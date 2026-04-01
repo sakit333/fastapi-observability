@@ -4,9 +4,12 @@ services:
 
   app:
     build: ./app
+    image: sakit333/fastapi-observability:latest
     container_name: app
     ports:
       - "8000:8000"
+    env_file:
+      - .env.docker
     volumes:
       - ./logs:/app/logs
     command: uvicorn main:app --host 0.0.0.0 --port 8000

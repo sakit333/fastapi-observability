@@ -1,0 +1,24 @@
+{
+    "title": "FastAPI Traces (Tempo)",
+    "schemaVersion": 38,
+    "refresh": "5s",
+    "panels": [
+        {
+            "type": "table",
+            "title": "Recent Traces",
+            "targets": [
+                {
+                    "queryType": "traceql",
+                    "query": "{}",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 10,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            }
+        }
+    ]
+}

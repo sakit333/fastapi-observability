@@ -1,0 +1,66 @@
+{
+    "title": "FastAPI Metrics (Prometheus)",
+    "schemaVersion": 38,
+    "refresh": "5s",
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "Request Rates",
+            "targets": [
+                {
+                    "expr": "rate(request_count[1m])",
+                    "legendFormat": "Root",
+                    "refId": "A"
+                },
+                {
+                    "expr": "rate(demo_info_count[1m])",
+                    "legendFormat": "Info",
+                    "refId": "B"
+                },
+                {
+                    "expr": "rate(demo_error_count[1m])",
+                    "legendFormat": "Error",
+                    "refId": "C"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Total Errors",
+            "targets": [
+                {
+                    "expr": "demo_error_count",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Latency (Avg)",
+            "targets": [
+                {
+                    "expr": "rate(demo_work_duration_seconds_sum[1m]) / rate(demo_work_duration_seconds_count[1m])",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            }
+        }
+    ]
+}

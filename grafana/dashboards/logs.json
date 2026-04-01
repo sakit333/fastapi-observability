@@ -1,0 +1,55 @@
+{
+    "title": "FastAPI Logs (Loki)",
+    "schemaVersion": 38,
+    "refresh": "5s",
+    "panels": [
+        {
+            "type": "logs",
+            "title": "All Logs",
+            "targets": [
+                {
+                    "expr": "{job=\"app-logs\"} | json",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 10,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Error Logs Count",
+            "targets": [
+                {
+                    "expr": "count_over_time({job=\"app-logs\"} | json | level=\"ERROR\" [1m])",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 5,
+                "w": 12,
+                "x": 0,
+                "y": 10
+            }
+        },
+        {
+            "type": "logs",
+            "title": "Trace-linked Logs",
+            "targets": [
+                {
+                    "expr": "{job=\"app-logs\"} | json | trace_id!=\"\"",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 10,
+                "w": 24,
+                "x": 0,
+                "y": 15
+            }
+        }
+    ]
+}

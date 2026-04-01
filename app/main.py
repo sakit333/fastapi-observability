@@ -12,22 +12,28 @@ from opentelemetry.trace import Status, StatusCode
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+import os
+
+tempo_endpoint = os.environ.get("TEMPO_ENDPOINT", "http://tempo:4317")
+log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
+log_path = os.environ.get("LOG_PATH", "/app/logs/app.log")  
+log_level = getattr(logging, log_level_str, logging.INFO)
 
 # ---- OpenTelemetry Setup (Tempo) ----
 trace.set_tracer_provider(TracerProvider())
 tracer = trace.get_tracer(__name__)
 
-otlp_exporter = OTLPSpanExporter(endpoint="http://tempo:4317", insecure=True)
+otlp_exporter = OTLPSpanExporter(endpoint=tempo_endpoint, insecure=True)
 span_processor = BatchSpanProcessor(otlp_exporter)
 trace.get_tracer_provider().add_span_processor(span_processor)
 
 # ---- Python Logging with JSON and Trace IDs ----
 logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
+logger.setLevel(log_level)
 
 # Create file handler ensuring the directory matches our docker-compose volume (/app/logs)
-logHandler = logging.FileHandler("/app/logs/app.log")
-logHandler.setLevel(logging.INFO)
+logHandler = logging.FileHandler(log_path)
+logHandler.setLevel(log_level)
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record, record, message_dict):
@@ -56,10 +62,15 @@ def read_root():
     with tracer.start_as_current_span("root-span"):
         REQUEST_COUNT.inc()
         time.sleep(0.2)
+        logger.info("This is a demo info log, showing a successful operation.")
         return {"message": "Hello Observability 🚀"}
 
 @app.get("/metrics")
 def metrics():
+    with tracer .start_as_current_span("metrics-span"):
+        REQUEST_COUNT.inc()
+        time.sleep(0.7)
+        logger.info("Metrics requested")
     return Response(generate_latest(), media_type="text/plain")
 
 @app.get("/demo/info")
@@ -104,3 +115,27 @@ def demo_work():
             
         logger.info("Complex work process finished.")
         return {"status": "success", "message": "Work completed with traces.", "endpoint": "/demo/work"}
+
+@app.get("/test-trace")
+def test_trace():
+    with tracer.start_as_current_span("test-span"):
+        logger.info("Test trace started")
+        time.sleep(1)
+        logger.info("Test trace finished")
+        return {"status": "trace sent"}
+
+@app.on_event("startup")
+def startup_event():
+    with tracer.start_as_current_span("startup-span") as span:
+        logger.info(f"Application started at {time.time()}")
+        span.set_attribute("app.start_time", time.time())
+        span.set_attribute("app.name", "fastapi-observability")
+        span.set_attribute("app.version", "1.0.0")
+
+@app.on_event("shutdown")
+def shutdown_event():
+    with tracer.start_as_current_span("shutdown-span") as span:
+        logger.info(f"Application shutting down at {time.time()}")
+        span.set_attribute("app.shutdown_time", time.time())
+        span.set_attribute("app.name", "fastapi-observability")
+        span.set_attribute("app.version", "1.0.0")
