@@ -1,0 +1,15 @@
+{
+    "title": "FastAPI Metrics",
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "Request Count",
+            "targets": [
+                {
+                    "expr": "request_count",
+                    "refId": "A"
+                }
+            ]
+        }
+    ]
+}
