@@ -56,3 +56,8 @@ venv.bak/
 
 # Docker (Optional Overrides)
 docker-compose.override.yml
+
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
