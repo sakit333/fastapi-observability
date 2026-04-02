@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Float
 import uuid
 from sqlalchemy.dialects.postgresql import UUID
 from passlib.context import CryptContext
@@ -22,3 +22,10 @@ class User(Base):
     def hash_password(password: str) -> str:
         password = password.encode("utf-8")[:72]  # ✅ truncate safely
         return pwd_context.hash(password)
+
+# 1. Define a quick Product model if you haven't already
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    price = Column(Float)

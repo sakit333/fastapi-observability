@@ -4,12 +4,40 @@ server:
 distributor:
   receivers:
     otlp:
-      protocols:
+      protocols:  
         grpc:
+          endpoint: "0.0.0.0:4317"
         http:
+          endpoint: "0.0.0.0:4318"
+
+# This section enables the engine that calculates rate(), etc.
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /tmp/tempo/generator/wal
+  processor:
+    service_graphs:
+    span_metrics:
+  
+# IMPORTANT: You must tell Tempo to actually USE the generator
+usage_report:
+  enabled: false
+
+# Add this to ensure the search handles metrics
+querier:
+  search:
+    external_endpoints: []
 
 storage:
   trace:
     backend: local
     local:
       path: /tmp/tempo
+    # Tells Tempo where to find the metrics it just generated
+    wal:
+      path: /tmp/tempo/wal
+
+overrides:
+  metrics_generator_processors: [service-graphs, span-metrics]

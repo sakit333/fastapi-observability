@@ -79,8 +79,9 @@ services:
     volumes:
       - ./tempo/tempo.yml:/etc/tempo.yml
     ports:
-      - "3200:3200"
-      - "4317:4317"
+      - "3200:3200" # HTTP (Grafana UI/API)
+      - "4317:4317"  
+      - "4318:4318"
 
   promtail:
     image: grafana/promtail:2.9.0

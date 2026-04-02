@@ -1,6 +1,9 @@
 fastapi
 uvicorn[standard]
 
+# HTTP client
+httpx
+
 # Templates & static
 jinja2
 aiofiles

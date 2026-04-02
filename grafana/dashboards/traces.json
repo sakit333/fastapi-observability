@@ -1,24 +1,71 @@
 {
-    "title": "FastAPI Traces (Tempo)",
-    "schemaVersion": 38,
-    "refresh": "5s",
-    "panels": [
+  "title": "FastAPI Traces (Tempo) - Fixed",
+  "schemaVersion": 42,
+  "refresh": "5s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Recent Traces",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
         {
-            "type": "table",
-            "title": "Recent Traces",
-            "targets": [
-                {
-                    "queryType": "traceql",
-                    "query": "{}",
-                    "refId": "A"
-                }
-            ],
-            "gridPos": {
-                "h": 10,
-                "w": 24,
-                "x": 0,
-                "y": 0
-            }
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{}",
+          "refId": "A"
         }
-    ]
+      ],
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Traces Status",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{}", 
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 10 }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Error Traces",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{status=error}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 15 }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Slow Traces (>500ms)",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{duration > 500ms}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 15 }
+    }
+  ]
 }

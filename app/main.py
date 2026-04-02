@@ -11,6 +11,8 @@ import logging
 from pythonjsonlogger import jsonlogger
 import asyncio
 
+import httpx
+
 from prometheus_client import Counter, Histogram, generate_latest
 
 from opentelemetry import trace
@@ -18,6 +20,8 @@ from opentelemetry.trace import Status, StatusCode
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+
 import os
 from pathlib import Path
 
@@ -25,14 +29,15 @@ from pathlib import Path
 import config as config_module
 from config import settings
 from db import get_db, redis_client, engine, Base
-from models import User
+from models import User, Product
 from schema import SignupRequest, LoginRequest, TokenResponse, UserResponse
 from auth import create_access_token, get_current_user, blacklist_token
 import os
+import uuid
 
-print("PWD:", os.getcwd())
-print("FILES:", os.listdir("."))
-print("TEMPLATES EXISTS:", os.path.exists("templates"))
+# print("PWD:", os.getcwd())
+# print("FILES:", os.listdir("."))
+# print("TEMPLATES EXISTS:", os.path.exists("templates"))
 # Ensure log directory exists
 log_dir = Path(settings.LOG_PATH).parent
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -43,7 +48,12 @@ log_path =  settings.LOG_PATH
 log_level = getattr(logging, log_level_str, logging.INFO)
 
 # ---- OpenTelemetry Setup (Tempo) ----
-trace.set_tracer_provider(TracerProvider())
+# Define the resource
+resource = Resource(attributes={
+    SERVICE_NAME: "fastapi-observability"
+})
+# Set up the tracer provider with the resource
+trace.set_tracer_provider(TracerProvider(resource=resource))
 tracer = trace.get_tracer(__name__)
 
 otlp_exporter = OTLPSpanExporter(endpoint=tempo_endpoint, insecure=True)
@@ -61,14 +71,26 @@ logHandler.setLevel(log_level)
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record, record, message_dict):
         super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
+
+        # Rename level
+        if "levelname" in log_record:
+            log_record["level"] = log_record.pop("levelname")
+
+        # Add clean message field
+        log_record["message"] = record.getMessage()
+
+        # Add trace info
         span = trace.get_current_span()
         if span.is_recording():
             ctx = span.get_span_context()
-            # Loki can use these trace_id fields for correlation
             log_record["trace_id"] = format(ctx.trace_id, "032x")
             log_record["span_id"] = format(ctx.span_id, "016x")
 
-formatter = CustomJsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+# formatter = CustomJsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+formatter = CustomJsonFormatter(
+    '%(asctime)s %(levelname)s %(name)s %(message)s',
+    rename_fields={"levelname": "level"}
+)
 logHandler.setFormatter(formatter)
 logger.addHandler(logHandler)
 
@@ -83,20 +105,39 @@ app = FastAPI()
 # Middleware for logging and tracing
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    request_id = str(uuid.uuid4())
     with tracer.start_as_current_span(f"http-{request.method}-{request.url.path}") as span:
         span.set_attribute("http.method", request.method)
         span.set_attribute("http.url", str(request.url))
+        span.set_attribute("request_id", request_id)
         start_time = time.time()
         try:
             response = await call_next(request)
             process_time = time.time() - start_time
             span.set_attribute("http.status_code", response.status_code)
-            span.set_attribute("http.response_time", process_time)
-            logger.info(f"Request: {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.2f}s")
+            logger.info(
+                "Request completed",
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": response.status_code,
+                    "duration": process_time
+                }
+            )
+            # span.set_attribute("http.response_time", process_time)
+            # logger.info(f"Request: {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.2f}s")
             return response
-        except Exception as e:
-            logger.error("An error occurred while processing the request", exc_info=True)
-            raise e
+        except Exception:
+            logger.error(
+                "Request failed",
+                exc_info=True,
+                extra={"request_id": request_id}
+            )
+            raise
+        # except Exception as e:
+        #     logger.error("An error occurred while processing the request", exc_info=True)
+        #     raise e
         
 
 # Mount static files
@@ -216,11 +257,19 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
         result = await db.execute(select(User).where(User.username == request.username))
         user = result.scalars().first()
         if not user or not user.verify_password(request.password):
-            logger.warning(f"Login failed for {request.username}")
+            logger.warning(
+                "Invalid login attempt",
+                extra={"username": request.username}
+            )
+            # logger.warning(f"Login failed for {request.username}")
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
         access_token = create_access_token(data={"sub": user.username})
-        logger.info(f"User {request.username} logged in successfully")
+        # logger.info(f"User {request.username} logged in successfully")
+        logger.info(
+            "User login success",
+            extra={"username": request.username}
+        )
         response = RedirectResponse(url=f"/home/{user.id}", status_code=303)
         response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
         return response
@@ -249,6 +298,42 @@ async def logout(request: Request):
     response = RedirectResponse(url="/", status_code=303)
     response.delete_cookie("access_token")
     return response
+
+@app.get("/demo/product-trace")
+async def demo_product_trace(db: AsyncSession = Depends(get_db)):
+    with tracer.start_as_current_span("product-lifecycle-parent") as parent_span:
+        trace_id = format(parent_span.get_span_context().trace_id, "032x")
+        
+        try:
+            # STEP 1: Ensure Table Exists (The "First Time" Trace)
+            with tracer.start_as_current_span("db-ensure-table"):
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+            
+            # STEP 2: Create a Product
+            with tracer.start_as_current_span("db-product-insert") as span:
+                new_product = Product(name="Gaming Laptop", price=1200.99)
+                db.add(new_product)
+                await db.commit()
+                await db.refresh(new_product)
+                span.set_attribute("product.id", new_product.id)
+                span.set_attribute("product.name", "Gaming Laptop")
+
+            # STEP 3: Search for the Product
+            with tracer.start_as_current_span("db-product-query"):
+                result = await db.execute(select(Product).where(Product.name == "Gaming Laptop"))
+                product = result.scalars().first()
+
+            return {
+                "status": "success",
+                "trace_id": trace_id,
+                "data": {"id": product.id, "name": product.name}
+            }
+
+        except Exception as e:
+            parent_span.set_status(Status(StatusCode.ERROR))
+            parent_span.record_exception(e)
+            return {"status": "error", "trace_id": trace_id, "detail": str(e)}
 
 @app.on_event("startup")
 async def startup_event():
@@ -290,3 +375,29 @@ def shutdown_event():
         span.set_attribute("app.shutdown_time", time.time())
         span.set_attribute("app.name", "fastapi-observability")
         span.set_attribute("app.version", "1.0.0")
+
+@app.get("/check-tempo")
+async def check_tempo_api():
+    # Use the container name 'tempo' as defined in your docker-compose
+    tempo_url = "http://tempo:3200" 
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # 1. Check if Tempo is 'ready' (Storage + Ingester status)
+            ready_resp = await client.get(f"{tempo_url}/ready")
+            
+            # 2. Check if the Query API is responding
+            echo_resp = await client.get(f"{tempo_url}/api/echo")
+            
+            return {
+                "tempo_status": "online",
+                "readiness": ready_resp.text.strip(),
+                "echo_response": echo_resp.text.strip(),
+                "ready_code": ready_resp.status_code
+            }
+        except Exception as e:
+            return {
+                "tempo_status": "offline",
+                "error": str(e),
+                "hint": "Check if Tempo container is running and 'tempo' hostname is correct."
+            }
