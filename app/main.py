@@ -1,9 +1,15 @@
-from fastapi import FastAPI
-from fastapi.responses import Response
+from fastapi import FastAPI, Request, Form, HTTPException, Depends
+from fastapi.responses import Response, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.exc import IntegrityError
 import time
 import random
 import logging
 from pythonjsonlogger import jsonlogger
+import asyncio
 
 from prometheus_client import Counter, Histogram, generate_latest
 
@@ -13,10 +19,27 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 import os
+from pathlib import Path
 
-tempo_endpoint = os.environ.get("TEMPO_ENDPOINT", "http://tempo:4317")
-log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
-log_path = os.environ.get("LOG_PATH", "/app/logs/app.log")  
+# Import config first to set up environment
+import config as config_module
+from config import settings
+from db import get_db, redis_client, engine, Base
+from models import User
+from schema import SignupRequest, LoginRequest, TokenResponse, UserResponse
+from auth import create_access_token, get_current_user, blacklist_token
+import os
+
+print("PWD:", os.getcwd())
+print("FILES:", os.listdir("."))
+print("TEMPLATES EXISTS:", os.path.exists("templates"))
+# Ensure log directory exists
+log_dir = Path(settings.LOG_PATH).parent
+log_dir.mkdir(parents=True, exist_ok=True)
+
+tempo_endpoint = settings.TEMPO_ENDPOINT
+log_level_str = settings.LOG_LEVEL
+log_path =  settings.LOG_PATH 
 log_level = getattr(logging, log_level_str, logging.INFO)
 
 # ---- OpenTelemetry Setup (Tempo) ----
@@ -57,13 +80,44 @@ WORK_DURATION = Histogram("demo_work_duration_seconds", "Duration of /demo/work 
 
 app = FastAPI()
 
-@app.get("/")
-def read_root():
+# Middleware for logging and tracing
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    with tracer.start_as_current_span(f"http-{request.method}-{request.url.path}") as span:
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.url", str(request.url))
+        start_time = time.time()
+        try:
+            response = await call_next(request)
+            process_time = time.time() - start_time
+            span.set_attribute("http.status_code", response.status_code)
+            span.set_attribute("http.response_time", process_time)
+            logger.info(f"Request: {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.2f}s")
+            return response
+        except Exception as e:
+            logger.error("An error occurred while processing the request", exc_info=True)
+            raise e
+        
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Templates
+templates = Jinja2Templates(directory="./templates")
+
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    REQUEST_COUNT.inc()
+    await asyncio.sleep(0.2)
+
     with tracer.start_as_current_span("root-span"):
-        REQUEST_COUNT.inc()
-        time.sleep(0.2)
-        logger.info("This is a demo info log, showing a successful operation.")
-        return {"message": "Hello Observability 🚀"}
+        logger.info("This is a demo info log")
+
+    return templates.TemplateResponse(
+        request,               # ✅ FIRST
+        "index.html",          # ✅ SECOND
+        {"request": request}   # ✅ THIRD
+    )
 
 @app.get("/metrics")
 def metrics():
@@ -124,18 +178,115 @@ def test_trace():
         logger.info("Test trace finished")
         return {"status": "trace sent"}
 
+# Auth endpoints
+@app.get("/signup", response_class=HTMLResponse)
+def signup_page(request: Request):
+    return templates.TemplateResponse(request, "signup.html", {"request": request})
+
+@app.post("/signup")
+async def signup(request: SignupRequest, db: AsyncSession = Depends(get_db)):
+    with tracer.start_as_current_span("signup-span"):
+        logger.info(f"Signup attempt for user: {request.username}")
+        hashed_password = User.hash_password(request.password)
+        user = User(
+            username=request.username,
+            email=request.email,
+            phone_number=request.phone_number,
+            password=hashed_password
+        )
+        try:
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            logger.info(f"User {request.username} signed up successfully")
+            return RedirectResponse(url="/login", status_code=303)
+        except IntegrityError:
+            await db.rollback()
+            logger.warning(f"Signup failed for {request.username}: user already exists")
+            raise HTTPException(status_code=400, detail="User already exists")
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    return templates.TemplateResponse(request, "login.html", {"request": request})
+
+@app.post("/login")
+async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
+    with tracer.start_as_current_span("login-span"):
+        logger.info(f"Login attempt for user: {request.username}")
+        result = await db.execute(select(User).where(User.username == request.username))
+        user = result.scalars().first()
+        if not user or not user.verify_password(request.password):
+            logger.warning(f"Login failed for {request.username}")
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        access_token = create_access_token(data={"sub": user.username})
+        logger.info(f"User {request.username} logged in successfully")
+        response = RedirectResponse(url=f"/home/{user.id}", status_code=303)
+        response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
+        return response
+
+@app.get("/home/{user_id}", response_class=HTMLResponse)
+async def home(user_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        {"request": request, "user": user}
+    )
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    token = request.cookies.get("access_token")
+    if token:
+        token = token.replace("Bearer ", "")
+        await blacklist_token(token)
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie("access_token")
+    return response
+
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
     with tracer.start_as_current_span("startup-span") as span:
-        logger.info(f"Application started at {time.time()}")
+        logger.info("Application starting up")
+        
+        try:
+            # Create tables
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database tables created")
+            
+            # Test DB connection
+            async with get_db() as db:
+                result = await db.execute(select(1))
+                await result.fetchone()
+            logger.info("Database connection successful")
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            logger.warning("App starting without database connectivity")
+        
+        try:
+            # Test Redis connection
+            await redis_client.ping()
+            logger.info("Redis connection successful")
+        except Exception as e:
+            logger.error(f"Redis connection failed: {e}")
+            logger.warning("App starting without Redis connectivity")
+        
         span.set_attribute("app.start_time", time.time())
         span.set_attribute("app.name", "fastapi-observability")
         span.set_attribute("app.version", "1.0.0")
+        logger.info("Application startup completed")
 
 @app.on_event("shutdown")
 def shutdown_event():
     with tracer.start_as_current_span("shutdown-span") as span:
-        logger.info(f"Application shutting down at {time.time()}")
+        logger.info("Application shutting down")
         span.set_attribute("app.shutdown_time", time.time())
         span.set_attribute("app.name", "fastapi-observability")
         span.set_attribute("app.version", "1.0.0")

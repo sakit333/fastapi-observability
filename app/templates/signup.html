@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Sign Up</h1>
+
+        <!-- REMOVE form action/method -->
+        <form id="signupForm">
+            <input type="text" id="username" placeholder="Username" required>
+            <input type="email" id="email" placeholder="Email" required>
+            <input type="text" id="phone_number" placeholder="Phone Number" required>
+            <input type="password" id="password" placeholder="Password" required>
+            <button type="submit">Sign Up</button>
+        </form>
+
+        <p id="message"></p>
+
+        <p>Already have an account? <a href="/login">Login</a></p>
+    </div>
+
+    <script>
+    document.getElementById("signupForm").addEventListener("submit", async function(e) {
+        e.preventDefault();
+
+        const data = {
+            username: document.getElementById("username").value,
+            email: document.getElementById("email").value,
+            phone_number: document.getElementById("phone_number").value,
+            password: document.getElementById("password").value
+        };
+
+        try {
+            const response = await fetch("/signup", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(data),
+                redirect: "follow" // default, but keep explicit
+            });
+
+            // ✅ IMPORTANT: manually redirect browser
+            if (response.redirected) {
+                window.location.href = response.url;
+                return;
+            }
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                document.getElementById("message").innerText =
+                    result.detail || "Signup failed";
+            }
+
+        } catch (error) {
+            document.getElementById("message").innerText =
+                "Something went wrong!";
+        }
+    });
+    </script>
+</body>
+</html>
