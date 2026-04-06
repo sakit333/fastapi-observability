@@ -45,7 +45,7 @@ venv.bak/
 /loki/data/compactor/*
 
 # Logs
-/logs/*
+*/*.log
 
 # IDEs / Editors
 .vscode/
