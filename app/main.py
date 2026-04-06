@@ -265,7 +265,10 @@ async def read_root(request: Request):
     REQUEST_COUNT.inc()
     await asyncio.sleep(0.2)
 
-    with tracer.start_as_current_span("root-span"):
+    with tracer.start_as_current_span("root-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
+        span.set_attribute("demo.endpoint", "/")
+        logger.info("Root endpoint accessed", extra={"trace_id": trace_id})
         logger.info("This is a demo info log")
 
     return templates.TemplateResponse(
@@ -276,22 +279,25 @@ async def read_root(request: Request):
 
 @app.get("/metrics")
 def metrics():
-    with tracer .start_as_current_span("metrics-span"):
+    with tracer .start_as_current_span("metrics-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         REQUEST_COUNT.inc()
         time.sleep(0.7)
-        logger.info("Metrics requested")
+        logger.info("Metrics requested", extra={"trace_id": trace_id})
     return Response(generate_latest(), media_type="text/plain")
 
 @app.get("/demo/info")
 def demo_info():
-    with tracer.start_as_current_span("demo-info-span"):
+    with tracer.start_as_current_span("demo-info-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         INFO_COUNT.inc()
         logger.info("This is a demo info log, showing a successful operation.")
-        return {"status": "success", "message": "Info logged safely!", "endpoint": "/demo/info"}
+        return {"status": "success", "message": "Info logged safely!", "trace_id": trace_id, "endpoint": "/demo/info"}
 
 @app.get("/demo/error")
 def demo_error():
     with tracer.start_as_current_span("demo-error-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         ERROR_COUNT.inc()
         try:
             # Simulate a crash
@@ -301,7 +307,7 @@ def demo_error():
             span.record_exception(e)
             # Marking span as error
             span.set_status(Status(StatusCode.ERROR, "Division by zero"))
-            return {"status": "error", "message": "Check the logs, something broke!"}
+            return {"status": "error", "message": "Check the logs, something broke!", "trace_id": trace_id, "endpoint": "/demo/error"}
 
 @app.get("/demo/work")
 @WORK_DURATION.time()
@@ -327,11 +333,12 @@ def demo_work():
 
 @app.get("/test-trace")
 def test_trace():
-    with tracer.start_as_current_span("test-span"):
-        logger.info("Test trace started")
+    with tracer.start_as_current_span("test-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
+        logger.info("Test trace started", extra={"trace_id": trace_id})
         time.sleep(1)
-        logger.info("Test trace finished")
-        return {"status": "trace sent"}
+        logger.info("Test trace finished", extra={"trace_id": trace_id})
+        return {"status": "trace sent", "trace_id": trace_id, "endpoint": "/test-trace"}
 
 # Auth endpoints
 @app.get("/signup", response_class=HTMLResponse)
@@ -340,8 +347,9 @@ def signup_page(request: Request):
 
 @app.post("/signup")
 async def signup(request: SignupRequest, db: AsyncSession = Depends(get_db)):
-    with tracer.start_as_current_span("signup-span"):
-        logger.info(f"Signup attempt for user: {request.username}")
+    with tracer.start_as_current_span("signup-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
+        logger.info(f"Signup attempt for user: {request.username}", extra={"trace_id": trace_id})
         hashed_password = User.hash_password(request.password)
         user = User(
             username=request.username,
@@ -354,11 +362,11 @@ async def signup(request: SignupRequest, db: AsyncSession = Depends(get_db)):
             await db.commit()
             await db.refresh(user)
             logger.info(f"User {request.username} signed up successfully")
-            return RedirectResponse(url="/login", status_code=303)
+            return RedirectResponse(url="/login", status_code=303, headers={"X-Trace-ID": trace_id})
         except IntegrityError:
             await db.rollback()
             logger.warning(f"Signup failed for {request.username}: user already exists")
-            raise HTTPException(status_code=400, detail="User already exists")
+            raise HTTPException(status_code=400, detail="User already exists", headers={"X-Trace-ID": trace_id})
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
@@ -518,7 +526,10 @@ async def check_tempo_api():
 
 @app.get("/demo/slo")
 def slo_test(success: bool = True):
-    with tracer.start_as_current_span("slo-test-span"):
+    with tracer.start_as_current_span("slo-test-span") as span:
+        span.set_attribute("slo.success", success)
+        span.set_attribute("slo.test_id", "test-1")
+        trace_id = format(span.get_span_context().trace_id, "032x")
         REQUEST_COUNT.inc()
 
         if not success:
@@ -527,4 +538,4 @@ def slo_test(success: bool = True):
             raise HTTPException(status_code=500, detail="SLO failure")
 
         logger.info("SLO success")
-        return {"status": "success"}
+        return {"status": "success", "trace_id": trace_id, "endpoint": "/demo/slo"}
