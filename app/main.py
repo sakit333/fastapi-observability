@@ -34,6 +34,8 @@ from schema import SignupRequest, LoginRequest, TokenResponse, UserResponse
 from auth import create_access_token, get_current_user, blacklist_token
 import os
 import uuid
+# lgtm realtime practice: python/fastapi-logging-tracing
+from prometheus_client import Counter
 
 # print("PWD:", os.getcwd())
 # print("FILES:", os.listdir("."))
@@ -67,6 +69,15 @@ logger.setLevel(log_level)
 # Create file handler ensuring the directory matches our docker-compose volume (/app/logs)
 logHandler = logging.FileHandler(log_path)
 logHandler.setLevel(log_level)
+
+# Templates
+templates = Jinja2Templates(directory="./templates")
+
+USER_REQUEST_COUNT = Counter(
+    "user_request_count",
+    "Requests per user",
+    ["user_id"]
+)
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record, record, message_dict):
@@ -102,6 +113,8 @@ WORK_DURATION = Histogram("demo_work_duration_seconds", "Duration of /demo/work 
 
 app = FastAPI()
 
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 # Middleware for logging and tracing
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -140,20 +153,156 @@ async def log_requests(request: Request, call_next):
         #     raise e
         
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Simulated payment flow with multiple spans, attributes, and error handling to demonstrate tracing and logging in a realistic scenario
 
-# Templates
-templates = Jinja2Templates(directory="./templates")
+@app.get("/phonepe/payment/{amount}")
+def payment_simulation(amount: float):
+    with tracer.start_as_current_span("payment-api-span") as parent_span:
+        trace_id = format(parent_span.get_span_context().trace_id, "032x")
+        REQUEST_COUNT.inc()
 
-# lgtm realtime practice: python/fastapi-logging-tracing
-from prometheus_client import Counter
+        logger.info(f"Payment request received | amount={amount} | trace_id={trace_id}")
 
-USER_REQUEST_COUNT = Counter(
-    "user_request_count",
-    "Requests per user",
-    ["user_id"]
-)
+        try:
+            # Step 1: Validate payment
+            with tracer.start_as_current_span("validate-payment") as validate_span:
+                validate_span.set_attribute("payment.amount", amount)
+                validate_span.set_attribute("service.type", "payment-processing")
+                time.sleep(random.uniform(0.1, 0.7))
+                logger.info("Payment validation completed")
+
+            # Step 2: Call PhonePe (external service simulation)
+            phonepe_response = call_phonepe_service(amount)
+
+            # Step 3: Final processing
+            with tracer.start_as_current_span("finalize-payment") as finalize_span:
+                finalize_span.set_attribute("service.type", "payment-processing")
+                finalize_span.set_attribute("payment.amount", amount)
+                time.sleep(random.uniform(0.1, 0.4))
+                logger.info("Payment finalized successfully")
+
+            return {
+                "status": "success",
+                "trace_id": trace_id,
+                "phonepe_status": phonepe_response
+            }
+
+        except Exception as e:
+            ERROR_COUNT.inc()
+            logger.error(f"Payment failed | error={str(e)} | trace_id={trace_id}")
+            raise HTTPException(status_code=500, detail=f"Payment failed | trace_id={trace_id}")
+
+def call_phonepe_service(amount: float):
+    with tracer.start_as_current_span("phonepe-service") as span:
+        # Add attributes (VERY IMPORTANT for tracing)
+        span.set_attribute("service.name", "phonepe")
+        span.set_attribute("payment.amount", amount)
+
+        logger.info(f"Calling PhonePe service | amount={amount}")
+
+        # Simulate latency
+        time.sleep(random.uniform(0.3, 0.8))
+
+        # Simulate success/failure
+        if random.choice([True, False]):
+            logger.info("PhonePe payment success")
+            return "success"
+        else:
+            logger.error("PhonePe payment failed")
+            raise Exception("PhonePe service error")
+
+
+# swiggy order flow simulation with multiple spans and error handling
+
+@app.get("/swiggy/order/{user_id}/{amount}")
+def swiggy_order_flow(user_id: int, amount: float):
+    with tracer.start_as_current_span("swiggy-order-flow") as parent_span:
+        parent_span.set_attribute("app.service", "swiggy")
+        parent_span.set_attribute("app.component", "order-service")
+        parent_span.set_attribute("user.id", user_id)
+        parent_span.set_attribute("payment.amount", amount)
+        trace_id = format(parent_span.get_span_context().trace_id, "032x")
+        REQUEST_COUNT.inc()
+
+        logger.info(f"Order received | user_id={user_id} | trace_id={trace_id}")
+
+        try:
+            # Step 1: Order Confirmation
+            with tracer.start_as_current_span("order-confirmation") as confirm_span:
+                confirm_span.set_attribute("user.id", user_id)
+                confirm_span.set_attribute("payment.amount", amount)
+                time.sleep(random.uniform(0.1, 0.3))
+                logger.info("Order confirmed")
+
+            # Step 2: Food Preparation
+            with tracer.start_as_current_span("food-preparation") as prep_span:
+                prep_span.set_attribute("user.id", user_id)
+                prep_span.set_attribute("payment.amount", amount)
+                prep_time = random.uniform(0.5, 1.5)
+                time.sleep(prep_time)
+                logger.info(f"Food preparation completed in {prep_time:.2f}s")
+
+            # Step 3: Food Ready
+            with tracer.start_as_current_span("food-ready") as ready_span:
+                ready_span.set_attribute("user.id", user_id)
+                ready_span.set_attribute("payment.amount", amount)
+                time.sleep(0.2)
+                logger.info("Food is ready for pickup")
+
+            # Step 4: Assign Delivery Partner
+            with tracer.start_as_current_span("assign-delivery-partner") as assign_span:
+                assign_span.set_attribute("user.id", user_id)
+                assign_span.set_attribute("payment.amount", amount)
+                time.sleep(random.uniform(0.2, 0.5))
+                partner_id = random.randint(1000, 9999)
+                logger.info(f"Delivery partner assigned | partner_id={partner_id}")
+
+            # Step 5: Delivery in Progress
+            with tracer.start_as_current_span("delivery-in-progress") as delivery_span:
+                delivery_span.set_attribute("user.id", user_id)
+                delivery_span.set_attribute("payment.amount", amount)
+                delivery_time = random.uniform(0.5, 1.5)
+                time.sleep(delivery_time)
+                logger.info(f"Delivery in progress | ETA={delivery_time:.2f}s")
+
+            # Step 6: Delivered
+            with tracer.start_as_current_span("order-delivered") as delivered_span:
+                delivered_span.set_attribute("user.id", user_id)
+                delivered_span.set_attribute("payment.amount", amount)
+                time.sleep(0.2)
+                logger.info("Order delivered successfully")
+
+            # Step 7: Payment
+            payment_status = process_payment(amount)
+
+            return {
+                "status": "completed",
+                "trace_id": trace_id,
+                "payment_status": payment_status
+            }
+
+        except Exception as e:
+            ERROR_COUNT.inc()
+            logger.error(f"Order failed | error={str(e)} | trace_id={trace_id}")
+            raise HTTPException(status_code=500, detail=f"Order failed | trace_id={trace_id}")
+        
+def process_payment(amount: float):
+    with tracer.start_as_current_span("payment-service") as span:
+        span.set_attribute("service.name", "phonepe")
+        span.set_attribute("payment.amount", amount)
+
+        logger.info(f"Processing payment | amount={amount}")
+
+        time.sleep(random.uniform(0.3, 0.7))
+
+        if random.choice([True, True, False]):  # more success rate
+            logger.info("Payment successful")
+            return "success"
+        else:
+            logger.error("Payment failed")
+            raise Exception("Payment failure")
+        
+# User metric endpoint to demonstrate user-specific metrics and tracing
 
 @app.get("/demo/user-metric/{user_id}")
 def user_metric(user_id: str):
