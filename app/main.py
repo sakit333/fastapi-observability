@@ -157,93 +157,100 @@ USER_REQUEST_COUNT = Counter(
 
 @app.get("/demo/user-metric/{user_id}")
 def user_metric(user_id: str):
-    with tracer.start_as_current_span("user-metric-span"):
+    with tracer.start_as_current_span("user-metric-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         USER_REQUEST_COUNT.labels(user_id=user_id).inc()
-        logger.info("User metric recorded", extra={"user_id": user_id})
-        return {"user_id": user_id}
+        logger.info("User metric recorded", extra={"user_id": user_id, "trace_id": trace_id, "endpoint": f"/demo/user-metric/{user_id}"})
+        return {"user_id": user_id, "trace_id": trace_id, "endpoint": f"/demo/user-metric/{user_id}"}
 
 @app.get("/demo/tenant/{tenant_id}")
 def tenant_demo(tenant_id: str):
     with tracer.start_as_current_span("tenant-span") as span:
         span.set_attribute("tenant.id", tenant_id)
-
+        trace_id = format(span.get_span_context().trace_id, "032x")
         logger.info(
             "Tenant request",
-            extra={"tenant_id": tenant_id}
+            extra={"tenant_id": tenant_id, "trace_id": trace_id, "endpoint": f"/demo/tenant/{tenant_id}"}
         )
 
-        return {"tenant": tenant_id}
+        return {"tenant": tenant_id, "trace_id": trace_id, "endpoint": f"/demo/tenant/{tenant_id}"}
 
 @app.get("/demo/load")
 async def generate_load():
-    with tracer.start_as_current_span("load-test-span"):
+    with tracer.start_as_current_span("load-test-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         tasks = []
         for _ in range(50):
             tasks.append(asyncio.sleep(random.uniform(0.1, 0.5)))
         await asyncio.gather(*tasks)
 
         logger.warning("Load spike generated")
-        return {"status": "load generated"}
+        return {"status": "load generated", "trace_id": trace_id, "endpoint": "/demo/load"}
 
 @app.get("/demo/background")
 async def background_task():
     async def task():
-        with tracer.start_as_current_span("background-job"):
+        with tracer.start_as_current_span("background-job") as span:
+            trace_id = format(span.get_span_context().trace_id, "032x")
             logger.info("Background job started")
             await asyncio.sleep(2)
             logger.info("Background job finished")
 
     asyncio.create_task(task())
 
-    return {"status": "background job started"}
+    return {"status": "background job started", "trace_id": task.trace_id, "endpoint": "/demo/background"}
 
 @app.get("/demo/dependency-failure")
 async def dependency_failure():
-    with tracer.start_as_current_span("dependency-call"):
+    with tracer.start_as_current_span("dependency-call") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         try:
             async with httpx.AsyncClient(timeout=1) as client:
                 await client.get("https://httpbin.org/delay/3")
         except Exception as e:
             logger.error("External dependency failed", exc_info=True)
-            raise HTTPException(status_code=502, detail="Dependency failure")
+            raise HTTPException(status_code=502, detail=f"Dependency failure and trace_id: {trace_id}")
 
-        return {"status": "ok"}
+        return {"status": "ok", "trace_id": trace_id, "endpoint": "/demo/dependency-failure"}
 
 @app.get("/demo/cache/{key}")
 async def cache_demo(key: str):
     with tracer.start_as_current_span("cache-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         value = await redis_client.get(key)
 
         if value:
             span.set_attribute("cache.hit", True)
             logger.info("Cache hit", extra={"key": key})
-            return {"key": key, "value": value, "cache": "hit"}
+            return {"key": key, "value": value, "cache": "hit", "trace_id": trace_id, "endpoint": f"/demo/cache/{key}"}
 
         await redis_client.set(key, "cached_value", ex=60)
         span.set_attribute("cache.hit", False)
         logger.warning("Cache miss", extra={"key": key})
 
-        return {"key": key, "value": "cached_value", "cache": "miss"}
+        return {"key": key, "value": "cached_value", "cache": "miss", "trace_id": trace_id, "endpoint": f"/demo/cache/{key}"}
 
 @app.get("/demo/alert")
 def trigger_alert():
-    with tracer.start_as_current_span("alert-span"):
+    with tracer.start_as_current_span("alert-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
         for _ in range(20):
             ERROR_COUNT.inc()
 
         logger.critical("Alert condition triggered!")
-        return {"status": "alert triggered"}
+        return {"status": "alert triggered", "trace_id": trace_id, "endpoint": "/demo/alert"}
     
 @app.get("/demo/retry")
 async def retry_demo(attempt: int = 1):
     with tracer.start_as_current_span("retry-span") as span:
         span.set_attribute("retry.attempt", attempt)
+        trace_id = format(span.get_span_context().trace_id, "032x")
 
         if attempt < 3:
             logger.warning(f"Retry attempt {attempt}")
-            raise HTTPException(status_code=500, detail="Retry needed")
+            raise HTTPException(status_code=500, detail=f"Retry needed and trace_id: {trace_id}")
 
-        return {"status": "success after retry"}
+        return {"status": "success after retry", "trace_id": trace_id, "endpoint": "/demo/retry"}
 
 @app.get("/demo/session")
 def session_demo(request: Request):
@@ -251,13 +258,14 @@ def session_demo(request: Request):
 
     with tracer.start_as_current_span("session-span") as span:
         span.set_attribute("session.id", session_id)
+        trace_id = format(span.get_span_context().trace_id, "032x")
 
         logger.info(
             "Session activity",
             extra={"session_id": session_id}
         )
 
-        return {"session_id": session_id}
+        return {"session_id": session_id, "trace_id": trace_id, "endpoint": "/demo/session"}
 
 # Demo endpoints
 @app.get("/", response_class=HTMLResponse)
@@ -313,6 +321,8 @@ def demo_error():
 @WORK_DURATION.time()
 def demo_work():
     with tracer.start_as_current_span("demo-work-parent-span") as parent_span:
+        parent_span.set_attribute("demo.work_type", "complex_process")
+        trace_id = format(parent_span.get_span_context().trace_id, "032x")
         logger.info("Starting a complex multi-step work process.")
         
         # Step 1
@@ -329,7 +339,7 @@ def demo_work():
             child_span_2.set_attribute("http.url", "https://api.example.com/data")
             
         logger.info("Complex work process finished.")
-        return {"status": "success", "message": "Work completed with traces.", "endpoint": "/demo/work"}
+        return {"status": "success", "message": "Work completed with traces.", "trace_id": trace_id,    "endpoint": "/demo/work"}
 
 @app.get("/test-trace")
 def test_trace():
@@ -527,15 +537,13 @@ async def check_tempo_api():
 @app.get("/demo/slo")
 def slo_test(success: bool = True):
     with tracer.start_as_current_span("slo-test-span") as span:
-        span.set_attribute("slo.success", success)
-        span.set_attribute("slo.test_id", "test-1")
         trace_id = format(span.get_span_context().trace_id, "032x")
         REQUEST_COUNT.inc()
 
         if not success:
             ERROR_COUNT.inc()
             logger.error("SLO failure triggered")
-            raise HTTPException(status_code=500, detail="SLO failure")
+            raise HTTPException(status_code=500, detail=f"SLO failure and trace_id: {trace_id}")
 
         logger.info("SLO success")
         return {"status": "success", "trace_id": trace_id, "endpoint": "/demo/slo"}
