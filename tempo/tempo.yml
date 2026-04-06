@@ -21,9 +21,9 @@ metrics_generator:
     service_graphs:
     span_metrics:
   
-# IMPORTANT: You must tell Tempo to actually USE the generator
-usage_report:
-  enabled: false
+# # IMPORTANT: You must tell Tempo to actually USE the generator
+# usage_report:
+#   enabled: false
 
 # Add this to ensure the search handles metrics
 querier:

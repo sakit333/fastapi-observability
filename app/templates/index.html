@@ -3,26 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FastAPI Observability</title>
+    <title>Observability Dashboard</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Welcome to FastAPI Observability</h1>
-        <p>Click the buttons below to test different endpoints:</p>
-        <div class="buttons">
-            <button onclick="callEndpoint('/demo/info')">Demo Info</button>
-            <button onclick="callEndpoint('/demo/error')">Demo Error</button>
-            <button onclick="callEndpoint('/demo/work')">Demo Work</button>
-            <button onclick="callEndpoint('/test-trace')">Test Trace</button>
-            <button onclick="callEndpoint('/demo/product-trace')">DB Trace</button>
-            <button onclick="callEndpoint('/check-tempo')">Check Tempo</button>
-            <a href="/metrics" target="_blank"><button>Metrics</button></a>
-            <a href="/signup"><button>Sign Up</button></a>
-            <a href="/login"><button>Login</button></a>
-        </div>
-        <div id="response"></div>
+
+<div class="app">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h2>⚡ Endpoints</h2>
+
+        <!-- <button onclick="callEndpoint('/')">Home</button> -->
+        <!-- <a href="/"><button>Home</button></a> -->
+        <button onclick="callEndpoint('/demo/info')">Info</button>
+        <button onclick="callEndpoint('/demo/error')">Error</button>
+        <button onclick="callEndpoint('/demo/work')">Work</button>
+        <button onclick="callEndpoint('/test-trace')">Trace</button>
+        <button onclick="callEndpoint('/demo/product-trace')">DB Trace</button>
+
+        <hr>
+
+        <button onclick="callEndpoint('/demo/slo')">SLO Success</button>
+        <button onclick="callEndpoint('/demo/slo?success=false')">SLO Fail</button>
+        <button onclick="callEndpoint('/demo/load')">Load Spike</button>
+        <button onclick="callEndpoint('/demo/background')">Background Job</button>
+        <button onclick="callEndpoint('/demo/dependency-failure')">Dependency Fail</button>
+
+        <hr>
+
+        <button onclick="callEndpoint('/demo/cache/test')">Cache Test</button>
+        <button onclick="callEndpoint('/demo/tenant/tenant1')">Tenant 1</button>
+        <button onclick="callEndpoint('/demo/user-metric/user1')">User Metric</button>
+        <button onclick="callEndpoint('/demo/session')">Session</button>
+        <button onclick="callEndpoint('/demo/retry')">Retry</button>
+        <button onclick="callEndpoint('/demo/alert')">Trigger Alert</button>
+
+        <hr>
+
+        <a href="/metrics" target="_blank">📊 Metrics</a>
+        <a href="/signup">Signup</a>
+        <a href="/login">Login</a>
     </div>
-    <script src="/static/js/script.js"></script>
+
+    <!-- Main Content -->
+    <div class="main">
+        <h1>📡 Observability Playground</h1>
+        <p>Click any endpoint to generate logs, metrics, and traces.</p>
+
+        <div id="response-box">
+            <h3>Response</h3>
+            <pre id="response">Click an endpoint...</pre>
+        </div>
+    </div>
+
+</div>
+
+<script src="/static/js/script.js"></script>
 </body>
 </html>

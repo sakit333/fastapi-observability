@@ -146,6 +146,120 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Templates
 templates = Jinja2Templates(directory="./templates")
 
+# lgtm realtime practice: python/fastapi-logging-tracing
+from prometheus_client import Counter
+
+USER_REQUEST_COUNT = Counter(
+    "user_request_count",
+    "Requests per user",
+    ["user_id"]
+)
+
+@app.get("/demo/user-metric/{user_id}")
+def user_metric(user_id: str):
+    with tracer.start_as_current_span("user-metric-span"):
+        USER_REQUEST_COUNT.labels(user_id=user_id).inc()
+        logger.info("User metric recorded", extra={"user_id": user_id})
+        return {"user_id": user_id}
+
+@app.get("/demo/tenant/{tenant_id}")
+def tenant_demo(tenant_id: str):
+    with tracer.start_as_current_span("tenant-span") as span:
+        span.set_attribute("tenant.id", tenant_id)
+
+        logger.info(
+            "Tenant request",
+            extra={"tenant_id": tenant_id}
+        )
+
+        return {"tenant": tenant_id}
+
+@app.get("/demo/load")
+async def generate_load():
+    with tracer.start_as_current_span("load-test-span"):
+        tasks = []
+        for _ in range(50):
+            tasks.append(asyncio.sleep(random.uniform(0.1, 0.5)))
+        await asyncio.gather(*tasks)
+
+        logger.warning("Load spike generated")
+        return {"status": "load generated"}
+
+@app.get("/demo/background")
+async def background_task():
+    async def task():
+        with tracer.start_as_current_span("background-job"):
+            logger.info("Background job started")
+            await asyncio.sleep(2)
+            logger.info("Background job finished")
+
+    asyncio.create_task(task())
+
+    return {"status": "background job started"}
+
+@app.get("/demo/dependency-failure")
+async def dependency_failure():
+    with tracer.start_as_current_span("dependency-call"):
+        try:
+            async with httpx.AsyncClient(timeout=1) as client:
+                await client.get("https://httpbin.org/delay/3")
+        except Exception as e:
+            logger.error("External dependency failed", exc_info=True)
+            raise HTTPException(status_code=502, detail="Dependency failure")
+
+        return {"status": "ok"}
+
+@app.get("/demo/cache/{key}")
+async def cache_demo(key: str):
+    with tracer.start_as_current_span("cache-span") as span:
+        value = await redis_client.get(key)
+
+        if value:
+            span.set_attribute("cache.hit", True)
+            logger.info("Cache hit", extra={"key": key})
+            return {"key": key, "value": value, "cache": "hit"}
+
+        await redis_client.set(key, "cached_value", ex=60)
+        span.set_attribute("cache.hit", False)
+        logger.warning("Cache miss", extra={"key": key})
+
+        return {"key": key, "value": "cached_value", "cache": "miss"}
+
+@app.get("/demo/alert")
+def trigger_alert():
+    with tracer.start_as_current_span("alert-span"):
+        for _ in range(20):
+            ERROR_COUNT.inc()
+
+        logger.critical("Alert condition triggered!")
+        return {"status": "alert triggered"}
+    
+@app.get("/demo/retry")
+async def retry_demo(attempt: int = 1):
+    with tracer.start_as_current_span("retry-span") as span:
+        span.set_attribute("retry.attempt", attempt)
+
+        if attempt < 3:
+            logger.warning(f"Retry attempt {attempt}")
+            raise HTTPException(status_code=500, detail="Retry needed")
+
+        return {"status": "success after retry"}
+
+@app.get("/demo/session")
+def session_demo(request: Request):
+    session_id = request.headers.get("X-Session-ID", str(uuid.uuid4()))
+
+    with tracer.start_as_current_span("session-span") as span:
+        span.set_attribute("session.id", session_id)
+
+        logger.info(
+            "Session activity",
+            extra={"session_id": session_id}
+        )
+
+        return {"session_id": session_id}
+
+# Demo endpoints
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     REQUEST_COUNT.inc()
@@ -401,3 +515,16 @@ async def check_tempo_api():
                 "error": str(e),
                 "hint": "Check if Tempo container is running and 'tempo' hostname is correct."
             }
+
+@app.get("/demo/slo")
+def slo_test(success: bool = True):
+    with tracer.start_as_current_span("slo-test-span"):
+        REQUEST_COUNT.inc()
+
+        if not success:
+            ERROR_COUNT.inc()
+            logger.error("SLO failure triggered")
+            raise HTTPException(status_code=500, detail="SLO failure")
+
+        logger.info("SLO success")
+        return {"status": "success"}
