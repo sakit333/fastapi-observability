@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 import time
 import random
@@ -731,3 +732,238 @@ def slo_test(success: bool = True):
 
         logger.info("SLO success")
         return {"status": "success", "trace_id": trace_id, "endpoint": "/demo/slo"}
+    
+@app.get("/swiggy/realtime/{user_id}/{restaurant_id}/{item_id}")
+async def swiggy_realtime_order(
+    user_id: int,
+    restaurant_id: int,
+    item_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    with tracer.start_as_current_span("swiggy-realtime-flow") as parent_span:
+
+        # Root span attributes
+        parent_span.set_attribute("app.service", "swiggy")
+        parent_span.set_attribute("app.component", "order-service")
+        parent_span.set_attribute("user.id", user_id)
+
+        trace_id = format(parent_span.get_span_context().trace_id, "032x")
+        REQUEST_COUNT.inc()
+
+        logger.info(f"[START] Order request | user_id={user_id} | trace_id={trace_id}")
+
+        try:
+            # =========================
+            # 1. FETCH RESTAURANT (DB)
+            # =========================
+            with tracer.start_as_current_span("fetch-restaurant") as span:
+                span.set_attribute("db.system", "postgresql")
+
+                result = await db.execute(
+                    text("SELECT name FROM restaurants WHERE id=:id"),
+                    {"id": restaurant_id}
+                )
+                restaurant = result.fetchone()
+
+                if not restaurant:
+                    raise Exception("Restaurant not found")
+
+                restaurant_name = restaurant[0]
+                logger.info(f"Restaurant fetched: {restaurant_name}")
+
+            # =========================
+            # 2. FETCH FOOD ITEM (DB)
+            # =========================
+            with tracer.start_as_current_span("fetch-food-item") as span:
+                result = await db.execute(
+                    text("SELECT name, price, prep_time FROM food_items WHERE id=:id"),
+                    {"id": item_id}
+                )
+                item = result.fetchone()
+
+                if not item:
+                    raise Exception("Food item not found")
+
+                item_name, price, prep_time = item
+                logger.info(f"Item fetched: {item_name} | Price={price}")
+
+            # =========================
+            # 3. ESTIMATE DELIVERY
+            # =========================
+            with tracer.start_as_current_span("estimate-delivery") as span:
+                delivery_time = prep_time + random.randint(10, 20)
+                time.sleep(0.2)
+                logger.info(f"Estimated delivery time: {delivery_time} mins")
+
+            # =========================
+            # 4. CREATE ORDER (DB)
+            # =========================
+            with tracer.start_as_current_span("create-order") as span:
+                result = await db.execute(
+                    text("""
+                        INSERT INTO orders (user_id, restaurant_id, item_id, status)
+                        VALUES (:user_id, :restaurant_id, :item_id, :status)
+                        RETURNING id
+                    """),
+                    {
+                        "user_id": user_id,
+                        "restaurant_id": restaurant_id,
+                        "item_id": item_id,
+                        "status": "created"
+                    }
+                )
+
+                order_id = result.fetchone()[0]
+                await db.commit()
+
+                logger.info(f"Order created | order_id={order_id}")
+
+            # =========================
+            # 5. CONFIRM ORDER
+            # =========================
+            with tracer.start_as_current_span("order-confirmation"):
+                time.sleep(random.uniform(0.1, 0.3))
+                logger.info("Order confirmed")
+
+            # =========================
+            # 6. FOOD PREPARATION
+            # =========================
+            with tracer.start_as_current_span("food-preparation"):
+                prep_delay = random.uniform(0.5, 1.5)
+                time.sleep(prep_delay)
+                logger.info(f"Food prepared in {prep_delay:.2f}s")
+
+            # =========================
+            # 7. DELIVERY FLOW
+            # =========================
+            with tracer.start_as_current_span("delivery-flow"):
+                delivery_delay = random.uniform(0.5, 1.5)
+                time.sleep(delivery_delay)
+                logger.info(f"Delivered in {delivery_delay:.2f}s")
+
+            # =========================
+            # 8. PAYMENT (PHONEPE)
+            # =========================
+            try:
+                payment_status = process_payment(price)
+            except Exception as e:
+                payment_status = "failed"
+                logger.error(f"Payment failed | {str(e)}")
+
+            ORDER_REQUESTS.labels(status="success").inc()
+
+            logger.info(f"[END] Order completed | trace_id={trace_id}")
+
+            return {
+                "order_id": order_id,
+                "restaurant": restaurant_name,
+                "item": item_name,
+                "price": price,
+                "delivery_time": delivery_time,
+                "payment_status": payment_status,
+                "trace_id": trace_id
+            }
+
+        except Exception as e:
+            ERROR_COUNT.inc()
+            ORDER_REQUESTS.labels(status="failure").inc()
+
+            parent_span.set_status(Status(StatusCode.ERROR))
+            logger.error(f"[ERROR] {str(e)} | trace_id={trace_id}")
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Order failed | trace_id={trace_id}"
+            )
+
+@app.get("/swiggy/debug/{restaurant_id}")
+async def swiggy_debug(restaurant_id: int, db: AsyncSession = Depends(get_db)):
+
+    start_time = time.time()
+
+    with tracer.start_as_current_span("swiggy-debug-endpoint") as parent_span:
+
+        parent_span.set_attribute("app.service", "swiggy")
+        parent_span.set_attribute("debug.mode", True)
+
+        trace_id = format(parent_span.get_span_context().trace_id, "032x")
+        REQUEST_COUNT.inc()
+
+        logger.info(f"[DEBUG START] restaurant_id={restaurant_id} | trace_id={trace_id}")
+
+        try:
+            # =========================
+            # 1. DB QUERY TIMING
+            # =========================
+            with tracer.start_as_current_span("db-query") as span:
+
+                db_start = time.time()
+
+                result = await db.execute(
+                    text("SELECT * FROM food_items WHERE restaurant_id=:id"),
+                    {"id": restaurant_id}
+                )
+                items = result.fetchall()
+
+                db_end = time.time()
+                db_time = db_end - db_start
+
+                span.set_attribute("db.response.count", len(items))
+                span.set_attribute("db.query.time_ms", round(db_time * 1000, 2))
+
+                logger.info(f"DB Query Time: {db_time:.4f}s | rows={len(items)}")
+
+            # =========================
+            # 2. SIMULATE PROCESSING DELAY
+            # =========================
+            with tracer.start_as_current_span("processing-delay") as span:
+
+                process_start = time.time()
+
+                delay = random.uniform(0.2, 1.0)
+                time.sleep(delay)
+
+                process_end = time.time()
+                process_time = process_end - process_start
+
+                span.set_attribute("processing.time_ms", round(process_time * 1000, 2))
+
+                logger.info(f"Processing Time: {process_time:.4f}s")
+
+            # =========================
+            # 3. SLOW QUERY DETECTION
+            # =========================
+            if db_time > 0.5:
+                logger.warning(f"SLOW QUERY detected | {db_time:.4f}s")
+                parent_span.set_attribute("alert.slow_db", True)
+
+            # =========================
+            # 4. TOTAL API TIME
+            # =========================
+            end_time = time.time()
+            total_time = end_time - start_time
+
+            parent_span.set_attribute("api.total_time_ms", round(total_time * 1000, 2))
+
+            logger.info(f"[DEBUG END] Total API Time: {total_time:.4f}s")
+
+            return {
+                "restaurant_id": restaurant_id,
+                "items_count": len(items),
+                "db_time_sec": round(db_time, 4),
+                "processing_time_sec": round(process_time, 4),
+                "total_time_sec": round(total_time, 4),
+                "trace_id": trace_id
+            }
+
+        except Exception as e:
+            ERROR_COUNT.inc()
+            parent_span.set_status(Status(StatusCode.ERROR))
+
+            logger.error(f"[DEBUG ERROR] {str(e)} | trace_id={trace_id}")
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Debug failed | trace_id={trace_id}"
+            )
+
