@@ -1,0 +1,24 @@
+groups:
+  - name: swiggy-alerts
+    rules:
+
+      - alert: HighErrorRate
+        expr: rate(error_count[1m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+
+      - alert: HighTraffic
+        expr: rate(request_count[1m]) > 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "Traffic spike"
+
+      - alert: NoTraffic
+        expr: rate(request_count[1m]) == 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "No traffic"
