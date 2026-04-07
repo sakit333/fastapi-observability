@@ -112,6 +112,50 @@
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Payment Requests",
+      "targets": [
+        {
+          "expr": "rate(payment_requests_total[1m])",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Order Requests",
+      "targets": [
+        {
+          "expr": "rate(order_requests_total[1m])",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Payment Latency",
+      "targets": [
+        {
+          "expr": "rate(payment_latency_seconds_sum[1m]) / rate(payment_latency_seconds_count[1m])",
+          "legendFormat": "Avg Payment Latency",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Order Latency",
+      "targets": [
+        {
+          "expr": "rate(order_latency_seconds_sum[1m]) / rate(order_latency_seconds_count[1m])",
+          "legendFormat": "Avg Order Latency",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

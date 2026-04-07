@@ -35,7 +35,7 @@ from auth import create_access_token, get_current_user, blacklist_token
 import os
 import uuid
 # lgtm realtime practice: python/fastapi-logging-tracing
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 
 # print("PWD:", os.getcwd())
 # print("FILES:", os.listdir("."))
@@ -77,6 +77,28 @@ USER_REQUEST_COUNT = Counter(
     "user_request_count",
     "Requests per user",
     ["user_id"]
+)
+
+PAYMENT_REQUESTS = Counter(
+    "payment_requests_total",
+    "Total payment requests",
+    ["status"]  # success / failure
+)
+
+PAYMENT_LATENCY = Histogram(
+    "payment_latency_seconds",
+    "Payment processing latency"
+)
+
+ORDER_REQUESTS = Counter(
+    "order_requests_total",
+    "Total order requests",
+    ["status"]
+)
+
+ORDER_LATENCY = Histogram(
+    "order_latency_seconds",
+    "Order processing latency"
 )
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
@@ -128,16 +150,16 @@ async def log_requests(request: Request, call_next):
             response = await call_next(request)
             process_time = time.time() - start_time
             span.set_attribute("http.status_code", response.status_code)
-            logger.info(
-                "Request completed",
-                extra={
-                    "request_id": request_id,
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status_code": response.status_code,
-                    "duration": process_time
-                }
-            )
+            # logger.info(
+            #     "Request completed",
+            #     extra={
+            #         "request_id": request_id,
+            #         "method": request.method,
+            #         "path": request.url.path,
+            #         "status_code": response.status_code,
+            #         "duration": process_time
+            #     }
+            # )
             # span.set_attribute("http.response_time", process_time)
             # logger.info(f"Request: {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.2f}s")
             return response
@@ -156,6 +178,7 @@ async def log_requests(request: Request, call_next):
 # Simulated payment flow with multiple spans, attributes, and error handling to demonstrate tracing and logging in a realistic scenario
 
 @app.get("/phonepe/payment/{amount}")
+@PAYMENT_LATENCY.time()
 def payment_simulation(amount: float):
     with tracer.start_as_current_span("payment-api-span") as parent_span:
         trace_id = format(parent_span.get_span_context().trace_id, "032x")
@@ -180,6 +203,8 @@ def payment_simulation(amount: float):
                 finalize_span.set_attribute("payment.amount", amount)
                 time.sleep(random.uniform(0.1, 0.4))
                 logger.info("Payment finalized successfully")
+            
+            PAYMENT_REQUESTS.labels(status="success").inc()
 
             return {
                 "status": "success",
@@ -190,6 +215,7 @@ def payment_simulation(amount: float):
         except Exception as e:
             ERROR_COUNT.inc()
             logger.error(f"Payment failed | error={str(e)} | trace_id={trace_id}")
+            PAYMENT_REQUESTS.labels(status="failure").inc()
             raise HTTPException(status_code=500, detail=f"Payment failed | trace_id={trace_id}")
 
 def call_phonepe_service(amount: float):
@@ -274,7 +300,7 @@ def swiggy_order_flow(user_id: int, amount: float):
 
             # Step 7: Payment
             payment_status = process_payment(amount)
-
+            ORDER_REQUESTS.labels(status="success").inc()
             return {
                 "status": "completed",
                 "trace_id": trace_id,
@@ -284,6 +310,7 @@ def swiggy_order_flow(user_id: int, amount: float):
         except Exception as e:
             ERROR_COUNT.inc()
             logger.error(f"Order failed | error={str(e)} | trace_id={trace_id}")
+            ORDER_REQUESTS.labels(status="failure").inc()
             raise HTTPException(status_code=500, detail=f"Order failed | trace_id={trace_id}")
         
 def process_payment(amount: float):
@@ -426,7 +453,7 @@ async def read_root(request: Request):
         trace_id = format(span.get_span_context().trace_id, "032x")
         span.set_attribute("demo.endpoint", "/")
         logger.info("Root endpoint accessed", extra={"trace_id": trace_id})
-        logger.info("This is a demo info log")
+        # logger.info("This is a demo info log")
 
     return templates.TemplateResponse(
         request,               # ✅ FIRST
@@ -440,7 +467,8 @@ def metrics():
         trace_id = format(span.get_span_context().trace_id, "032x")
         REQUEST_COUNT.inc()
         time.sleep(0.7)
-        logger.info("Metrics requested", extra={"trace_id": trace_id})
+        print(f"Metrics endpoint accessed | trace_id={trace_id}")
+        # logger.info("Metrics requested", extra={"trace_id": trace_id})
     return Response(generate_latest(), media_type="text/plain")
 
 @app.get("/demo/info")
@@ -487,8 +515,8 @@ def demo_work():
             time.sleep(random.uniform(0.2, 0.8))
             child_span_2.set_attribute("http.url", "https://api.example.com/data")
             
-        logger.info("Complex work process finished.")
-        return {"status": "success", "message": "Work completed with traces.", "trace_id": trace_id,    "endpoint": "/demo/work"}
+        logger.info(f"Complex work process finished.")
+        return {"status": "success", "message": "Work completed with traces.", "trace_id": trace_id, "endpoint": "/demo/work"}
 
 @app.get("/test-trace")
 def test_trace():
@@ -587,12 +615,16 @@ async def demo_product_trace(db: AsyncSession = Depends(get_db)):
         
         try:
             # STEP 1: Ensure Table Exists (The "First Time" Trace)
-            with tracer.start_as_current_span("db-ensure-table"):
+            with tracer.start_as_current_span("db-ensure-table") as span:
+                span.set_attribute("db.operation", "create_table")
+                logger.info("Ensuring Product table exists (simulated first-time setup)")
                 async with engine.begin() as conn:
                     await conn.run_sync(Base.metadata.create_all)
             
             # STEP 2: Create a Product
             with tracer.start_as_current_span("db-product-insert") as span:
+                span.set_attribute("db.operation", "insert")
+                logger.info("Creating a new product (simulated)")
                 new_product = Product(name="Gaming Laptop", price=1200.99)
                 db.add(new_product)
                 await db.commit()
@@ -601,7 +633,9 @@ async def demo_product_trace(db: AsyncSession = Depends(get_db)):
                 span.set_attribute("product.name", "Gaming Laptop")
 
             # STEP 3: Search for the Product
-            with tracer.start_as_current_span("db-product-query"):
+            with tracer.start_as_current_span("db-product-query") as span:
+                span.set_attribute("db.operation", "select")
+                logger.info("Searching for the product (simulated)")
                 result = await db.execute(select(Product).where(Product.name == "Gaming Laptop"))
                 product = result.scalars().first()
 
@@ -614,6 +648,7 @@ async def demo_product_trace(db: AsyncSession = Depends(get_db)):
         except Exception as e:
             parent_span.set_status(Status(StatusCode.ERROR))
             parent_span.record_exception(e)
+            logger.error(f"Error in product trace demo: {str(e)}", exc_info=True)
             return {"status": "error", "trace_id": trace_id, "detail": str(e)}
 
 @app.on_event("startup")
