@@ -38,9 +38,7 @@ import uuid
 # lgtm realtime practice: python/fastapi-logging-tracing
 from prometheus_client import Counter, Histogram
 
-# print("PWD:", os.getcwd())
-# print("FILES:", os.listdir("."))
-# print("TEMPLATES EXISTS:", os.path.exists("templates"))
+
 # Ensure log directory exists
 log_dir = Path(settings.LOG_PATH).parent
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -101,6 +99,13 @@ ORDER_LATENCY = Histogram(
     "order_latency_seconds",
     "Order processing latency"
 )
+
+SERVICE_LATENCY = Histogram(
+    "service_latency_seconds",
+    "Latency per service",
+    ["service_name"]
+)
+
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record, record, message_dict):
@@ -316,12 +321,16 @@ def swiggy_order_flow(user_id: int, amount: float):
         
 def process_payment(amount: float):
     with tracer.start_as_current_span("payment-service") as span:
+        start_time = time.time()
         span.set_attribute("service.name", "phonepe")
         span.set_attribute("payment.amount", amount)
 
         logger.info(f"Processing payment | amount={amount}")
 
         time.sleep(random.uniform(0.3, 0.7))
+        duration = time.time() - start_time
+        SERVICE_LATENCY.labels(service_name="payment-service").observe(duration)
+        span.set_attribute("service.latency_ms", round(duration * 1000, 2))
 
         if random.choice([True, True, False]):  # more success rate
             logger.info("Payment successful")
@@ -330,6 +339,122 @@ def process_payment(amount: float):
             logger.error("Payment failed")
             raise Exception("Payment failure")
         
+# Simulated Canara Bank transfer flow with multiple spans, attributes, and error handling to demonstrate tracing and logging in a realistic banking scenario
+
+@app.post("/bank/canara/transfer/{user_id}/{amount}")
+async def canara_bank_transfer(
+    user_id: int,
+    amount: float,
+    db: AsyncSession = Depends(get_db)
+):
+    with tracer.start_as_current_span("canara-bank-transfer") as parent_span:
+
+        # Root attributes
+        parent_span.set_attribute("app.service", "banking")
+        parent_span.set_attribute("bank.name", "canara")
+        parent_span.set_attribute("user.id", user_id)
+        parent_span.set_attribute("transaction.amount", amount)
+
+        trace_id = format(parent_span.get_span_context().trace_id, "032x")
+        REQUEST_COUNT.inc()
+
+        logger.info(f"[START] Transfer initiated | user={user_id} | amount={amount} | trace_id={trace_id}")
+
+        try:
+            # =========================
+            # 1. ACCOUNT VALIDATION
+            # =========================
+            with tracer.start_as_current_span("account-validation") as span:
+                result = await db.execute(
+                    text("SELECT balance FROM accounts WHERE user_id=:id"),
+                    {"id": user_id}
+                )
+                account = result.fetchone()
+
+                if not account:
+                    raise Exception("Account not found")
+
+                balance = account[0]
+                logger.info(f"Account validated | balance={balance}")
+
+            # =========================
+            # 2. BALANCE CHECK
+            # =========================
+            with tracer.start_as_current_span("balance-check") as span:
+                if balance < amount:
+                    span.set_status(Status(StatusCode.ERROR))
+                    logger.error("Insufficient balance")
+                    raise Exception("Insufficient balance")
+
+                logger.info("Balance sufficient")
+
+            # =========================
+            # 3. FRAUD CHECK
+            # =========================
+            with tracer.start_as_current_span("fraud-check") as span:
+                time.sleep(random.uniform(0.1, 0.3))
+
+                if amount > 50000:
+                    span.set_attribute("fraud.flag", True)
+                    logger.warning("High value transaction - fraud check triggered")
+
+                logger.info("Fraud check passed")
+
+            # =========================
+            # 4. DEBIT TRANSACTION (DB)
+            # =========================
+            with tracer.start_as_current_span("debit-transaction") as span:
+                await db.execute(
+                    text("UPDATE accounts SET balance = balance - :amount WHERE user_id=:id"),
+                    {"amount": amount, "id": user_id}
+                )
+                await db.commit()
+
+                logger.info(f"Amount debited: {amount}")
+
+            # =========================
+            # 5. EXTERNAL PAYMENT (UPI)
+            # =========================
+            with tracer.start_as_current_span("upi-transfer") as span:
+                span.set_attribute("external.service", "upi")
+
+                time.sleep(random.uniform(0.3, 0.7))
+
+                if random.choice([True, True, False]):
+                    logger.info("UPI transfer success")
+                else:
+                    span.set_status(Status(StatusCode.ERROR))
+                    logger.error("UPI transfer failed")
+                    raise Exception("UPI failure")
+
+            # =========================
+            # 6. TRANSACTION COMPLETE
+            # =========================
+            with tracer.start_as_current_span("transaction-complete"):
+                logger.info("Transaction completed successfully")
+
+            ORDER_REQUESTS.labels(status="success").inc()
+
+            return {
+                "status": "success",
+                "amount": amount,
+                "bank": "Canara",
+                "trace_id": trace_id
+            }
+
+        except Exception as e:
+            ERROR_COUNT.inc()
+            ORDER_REQUESTS.labels(status="failure").inc()
+
+            parent_span.set_status(Status(StatusCode.ERROR))
+
+            logger.error(f"[ERROR] Transaction failed | {str(e)} | trace_id={trace_id}")
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Transaction failed | trace_id={trace_id}"
+            )
+
 # User metric endpoint to demonstrate user-specific metrics and tracing
 
 @app.get("/demo/user-metric/{user_id}")
@@ -751,7 +876,7 @@ async def swiggy_realtime_order(
         REQUEST_COUNT.inc()
 
         logger.info(f"[START] Order request | user_id={user_id} | trace_id={trace_id}")
-
+        start_time = time.time()
         try:
             # =========================
             # 1. FETCH RESTAURANT (DB)
@@ -774,13 +899,16 @@ async def swiggy_realtime_order(
             # =========================
             # 2. FETCH FOOD ITEM (DB)
             # =========================
-            with tracer.start_as_current_span("fetch-food-item") as span:
+            with tracer.start_as_current_span("menu-service") as span:
+                start_time = time.time()
                 result = await db.execute(
                     text("SELECT name, price, prep_time FROM food_items WHERE id=:id"),
                     {"id": item_id}
                 )
                 item = result.fetchone()
-
+                duration = time.time() - start_time
+                SERVICE_LATENCY.labels(service_name="menu-service").observe(duration)
+                span.set_attribute("service.latency_ms", round(duration * 1000, 2))
                 if not item:
                     raise Exception("Food item not found")
 
@@ -798,7 +926,8 @@ async def swiggy_realtime_order(
             # =========================
             # 4. CREATE ORDER (DB)
             # =========================
-            with tracer.start_as_current_span("create-order") as span:
+            with tracer.start_as_current_span("menu-service") as span:
+                start_time = time.time()
                 result = await db.execute(
                     text("""
                         INSERT INTO orders (user_id, restaurant_id, item_id, status)
@@ -815,6 +944,10 @@ async def swiggy_realtime_order(
 
                 order_id = result.fetchone()[0]
                 await db.commit()
+
+                duration = time.time() - start_time
+                SERVICE_LATENCY.labels(service_name="order-service").observe(duration)
+                span.set_attribute("service.latency_ms", round(duration * 1000, 2))
 
                 logger.info(f"Order created | order_id={order_id}")
 
@@ -836,9 +969,13 @@ async def swiggy_realtime_order(
             # =========================
             # 7. DELIVERY FLOW
             # =========================
-            with tracer.start_as_current_span("delivery-flow"):
+            with tracer.start_as_current_span("delivery-service") as span:
+                start_time = time.time()
                 delivery_delay = random.uniform(0.5, 1.5)
                 time.sleep(delivery_delay)
+                duration = time.time() - start_time
+                SERVICE_LATENCY.labels(service_name="delivery-service").observe(duration)
+                span.set_attribute("service.latency_ms", round(duration * 1000, 2))
                 logger.info(f"Delivered in {delivery_delay:.2f}s")
 
             # =========================
@@ -851,6 +988,8 @@ async def swiggy_realtime_order(
                 logger.error(f"Payment failed | {str(e)}")
 
             ORDER_REQUESTS.labels(status="success").inc()
+            duration = time.time() - start_time
+            ORDER_LATENCY.observe(duration)
 
             logger.info(f"[END] Order completed | trace_id={trace_id}")
 
@@ -870,7 +1009,8 @@ async def swiggy_realtime_order(
 
             parent_span.set_status(Status(StatusCode.ERROR))
             logger.error(f"[ERROR] {str(e)} | trace_id={trace_id}")
-
+            duration = time.time() - start_time
+            ORDER_LATENCY.observe(duration)
             raise HTTPException(
                 status_code=500,
                 detail=f"Order failed | trace_id={trace_id}"

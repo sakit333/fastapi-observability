@@ -25,6 +25,20 @@ CREATE TABLE orders (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE accounts (
+    id SERIAL PRIMARY KEY,
+    user_id INT UNIQUE,
+    balance FLOAT
+);
+
+INSERT INTO accounts (user_id, balance) VALUES
+(1, 10000),
+(2, 5000),
+(3, 75000),
+(4, 2000),
+(5, 15000);
+
+
 -- =========================
 -- RESTAURANTS (30 DATA)
 -- =========================
