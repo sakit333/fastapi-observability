@@ -1,0 +1,84 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+data:
+  tempo.yml: |
+    server:
+      http_listen_port: 3200
+
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+            http:
+
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /tmp/tempo
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      containers:
+        - name: tempo
+          image: grafana/tempo:2.3.0
+          args:
+            - "-config.file=/etc/tempo/tempo.yml"
+
+          ports:
+            - containerPort: 3200
+            - containerPort: 4317
+            - containerPort: 4318
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+spec:
+  selector:
+    app: tempo
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+    - name: grpc
+      port: 9095
+      targetPort: 9095
+    - name: otlp
+      port: 4317
+      targetPort: 4317

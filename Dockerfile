@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Avoid python buffering issues
+# Environment settings
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
@@ -8,19 +8,19 @@ ENV PYTHONPATH=/app
 # Set working directory
 WORKDIR /app
 
-# Install system deps (only what you need)
+# Install system dependencies
 RUN apt-get update && apt-get install -y curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install python deps first (better caching)
-COPY requirements.txt .
+# Copy only requirements first (for caching)
+COPY app/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app code
-COPY . .
+# Copy full app
+COPY app/ .
 
-# Expose port (optional, for clarity)
+# Expose port
 EXPOSE 8000
 
-# Default command (can be overridden by docker-compose / k8s)
+# Start app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
