@@ -61,3 +61,6 @@ docker-compose.override.yml
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
+
+
+k8s/logs/fastapi.log

@@ -62,6 +62,11 @@ cleanup_ports() {
   fi
 }
 
+delete_images() {
+  echo "🧹 Deleting local Docker images..."
+  docker rmi sakit333/fastapi-observability:latest --force
+}
+
 deploy_core() {
   echo "🔧 Deploying Core Services..."
   kubectl apply -f postgres-deploy-svc.yml -n $NAMESPACE
@@ -205,6 +210,7 @@ case $choice in
     cleanup_ports
     kubectl delete ns observability --ignore-not-found=true
     cleanup_ports
+    delete_images
     ;;
 
   6)

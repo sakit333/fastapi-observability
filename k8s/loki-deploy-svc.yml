@@ -17,12 +17,17 @@ data:
         kvstore:
           store: inmemory
 
+    # ✅ NEW (fix warning + enable log volume features)
+    limits_config:
+      retention_period: 168h   # 7 days
+      volume_enabled: true
+
     ingester:
       chunk_idle_period: 5m
       chunk_retain_period: 30s
       wal:
         enabled: true
-        dir: /loki/wal   # ✅ FIXED
+        dir: /loki/wal
 
     schema_config:
       configs:
@@ -41,6 +46,11 @@ data:
         shared_store: filesystem
       filesystem:
         directory: /loki/chunks
+
+    # ✅ NEW (important for retention + cleanup)
+    compactor:
+      working_directory: /loki/compactor
+      shared_store: filesystem
 
 ---
 apiVersion: v1
@@ -69,7 +79,7 @@ spec:
       labels:
         app: loki
     spec:
-      # 🔥 CRITICAL FIX (permission issue)
+      # ✅ Fix filesystem permission issue
       securityContext:
         fsGroup: 10001
 
@@ -82,7 +92,7 @@ spec:
           ports:
             - containerPort: 3100
 
-          # 🔥 REQUIRED for Loki internal user
+          # ✅ Required for Loki internal user
           securityContext:
             runAsUser: 10001
             runAsGroup: 10001
@@ -118,6 +128,7 @@ spec:
   selector:
     app: loki
   ports:
-    - port: 3100
+    - name: http   # ✅ FIX (good practice)
+      port: 3100
       targetPort: 3100
   type: ClusterIP

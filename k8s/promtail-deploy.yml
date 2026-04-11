@@ -21,7 +21,7 @@ data:
               - localhost
             labels:
               job: varlogs
-              __path__: /var/log/*.log
+              __path__: /var/logs/*.log
 
 ---
 apiVersion: apps/v1
@@ -48,11 +48,12 @@ spec:
             - name: config
               mountPath: /etc/promtail
             - name: logs
-              mountPath: /var/log
+              mountPath: /var/logs
 
       volumes:
         - name: config
           configMap:
             name: promtail-config
         - name: logs
-          emptyDir: {}
+          hostPath:
+            path: /tmp/app-logs

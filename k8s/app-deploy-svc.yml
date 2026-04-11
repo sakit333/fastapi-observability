@@ -13,10 +13,14 @@ spec:
       labels:
         app: fastapi
     spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox
+          command: ['sh', '-c', 'until nc -z postgres 5432; do echo waiting for db; sleep 2; done']
       containers:
         - name: fastapi
           image: sakit333/fastapi-observability:latest
-          imagePullPolicy: Never
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
 
@@ -55,7 +59,9 @@ spec:
 
       volumes:
         - name: logs
-          emptyDir: {}
+          hostPath:
+            path: /tmp/app-logs
+            type: DirectoryOrCreate
 
 ---
 apiVersion: v1
