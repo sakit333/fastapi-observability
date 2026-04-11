@@ -63,4 +63,4 @@ docker-compose.override.yml
 .terraform.lock.hcl
 
 
-k8s/logs/fastapi.log
+k8s/logs/*
