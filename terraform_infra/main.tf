@@ -83,8 +83,8 @@ resource "aws_security_group" "app_sg" {
 # 7. EC2 Instances
 resource "aws_instance" "app_server" {
   ami             = "ami-05d2d839d4f73aafb"
-  instance_type   = "c5a.xlarge"
-  key_name        = "srusti_203"
+  instance_type   = "m7i-flex.large"
+  key_name        = "default"
   count           = 1
   subnet_id       = aws_subnet.default_subnet.id
   security_groups = [aws_security_group.app_sg.id]
@@ -98,7 +98,7 @@ resource "aws_instance" "app_server" {
     Name = "default_server"
   }
 
-  user_data = file("sample.sh")
+  user_data = file("setup.sh")
 }
 
 # 8. Outputs

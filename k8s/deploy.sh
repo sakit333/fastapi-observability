@@ -79,6 +79,20 @@ build_images() {
   ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 
   docker build -t sakit333/fastapi-observability:latest "$ROOT_DIR"
+
+  echo "🔍 Checking for k3s..."
+
+  if command -v k3s >/dev/null 2>&1; then
+    echo "📦 k3s detected → importing image..."
+
+    sudo k3s ctr images rm docker.io/sakit333/fastapi-observability:latest 2>/dev/null || true
+
+    docker save sakit333/fastapi-observability:latest | sudo k3s ctr images import -
+
+    echo "✅ Image imported into k3s"
+  else
+    echo "ℹ️ k3s not found → skipping import (Docker/Docker Desktop case)"
+  fi
 }
 
 deploy_observability() {

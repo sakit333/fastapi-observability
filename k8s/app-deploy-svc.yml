@@ -20,7 +20,7 @@ spec:
       containers:
         - name: fastapi
           image: sakit333/fastapi-observability:latest
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
 

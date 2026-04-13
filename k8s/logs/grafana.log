@@ -21,3 +21,6 @@ Handling connection for 3000
 Handling connection for 3000
 Handling connection for 3000
 Handling connection for 3000
+Handling connection for 3000
+E0411 13:06:27.789056   18008 portforward.go:424] "Unhandled Error" err="an error occurred forwarding 3000 -> 3000: error forwarding port 3000 to pod 23a778b44c9b051e9239b7dc34ae00b92bf637e4f824648cc09eb9cfa70d0400, uid : network namespace for sandbox \"23a778b44c9b051e9239b7dc34ae00b92bf637e4f824648cc09eb9cfa70d0400\" is closed"
+error: lost connection to pod
