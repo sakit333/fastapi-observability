@@ -16,11 +16,11 @@ create_secrets() {
   # -----------------------------
   # 🔐 App Secrets
   # -----------------------------
-  if [ -f ../.env.prod ]; then
+  if [ -f .env.prod ]; then
     echo "🔐 Creating app secrets..."
 
     kubectl create secret generic app-secrets \
-      --from-env-file=../.env.prod \
+      --from-env-file=.env.prod \
       -n $NAMESPACE \
       --dry-run=client -o yaml | kubectl apply -f -
 
