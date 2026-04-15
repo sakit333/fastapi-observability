@@ -11,40 +11,28 @@ create_namespace() {
 }
 
 create_secrets() {
-  echo "🔐 Setting up Secrets and DB init..."
-
-  # Get project root (important when running from k8s/)
-  ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-
-  # -----------------------------
-  # 🔐 App Secrets
-  # -----------------------------
-  if [ -f "$ROOT_DIR/.env.prod" ]; then
-    echo "🔐 Creating app secrets..."
+  if [ -f .env.prod ]; then
+    echo "🔐 Creating Secrets..."
 
     kubectl create secret generic app-secrets \
-      --from-env-file="$ROOT_DIR/.env.prod" \
-      -n $NAMESPACE \
-      --dry-run=client -o yaml | kubectl apply -f -
+      --from-env-file=.env.prod \
+      -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
   else
-    echo "❌ ERROR: .env.prod not found in root directory"
+    echo "❌ ERROR: .env.prod not found"
     exit 1
   fi
-
-  # -----------------------------
-  # 🗄️ Postgres Init Script
-  # -----------------------------
   if [ -f "$ROOT_DIR/db-init/init.sql" ]; then
     echo "🗄️ Creating Postgres init script configmap..."
 
     kubectl create configmap postgres-init-script \
-      --from-file=init.sql="$ROOT_DIR/db-init/init.sql" \
+      --from-file=init.sql" \
       -n $NAMESPACE \
       --dry-run=client -o yaml | kubectl apply -f -
 
   else
     echo "⚠️ WARNING: init.sql not found, skipping DB init"
+    exit 1
   fi
 }
 
