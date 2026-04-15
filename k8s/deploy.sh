@@ -11,28 +11,37 @@ create_namespace() {
 }
 
 create_secrets() {
-  if [ -f .env.prod ]; then
-    echo "🔐 Creating Secrets..."
+  echo "🔐 Setting up Secrets and DB init..."
+
+  # -----------------------------
+  # 🔐 App Secrets
+  # -----------------------------
+  if [ -f ../.env.prod ]; then
+    echo "🔐 Creating app secrets..."
 
     kubectl create secret generic app-secrets \
-      --from-env-file=.env.prod \
-      -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+      --from-env-file=../.env.prod \
+      -n $NAMESPACE \
+      --dry-run=client -o yaml | kubectl apply -f -
 
   else
     echo "❌ ERROR: .env.prod not found"
     exit 1
   fi
-  if [ -f "$ROOT_DIR/db-init/init.sql" ]; then
-    echo "🗄️ Creating Postgres init script configmap..."
+
+  # -----------------------------
+  # 🗄️ Postgres Init Script
+  # -----------------------------
+  if [ -f init.sql ]; then
+    echo "🗄️ Creating Postgres init configmap..."
 
     kubectl create configmap postgres-init-script \
-      --from-file=init.sql" \
+      --from-file=init.sql=init.sql \
       -n $NAMESPACE \
       --dry-run=client -o yaml | kubectl apply -f -
 
   else
     echo "⚠️ WARNING: init.sql not found, skipping DB init"
-    exit 1
   fi
 }
 
