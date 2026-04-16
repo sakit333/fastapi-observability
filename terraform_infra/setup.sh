@@ -2,13 +2,9 @@
 
 set -e
 
-# =========================
-# GLOBAL CONFIG
-# =========================
 LOG_FILE="/var/log/k8s-setup.log"
 export DEBIAN_FRONTEND=noninteractive
 
-# Redirect ALL output to log + console
 exec > >(tee -a $LOG_FILE) 2>&1
 
 echo "=============================="
@@ -17,98 +13,126 @@ echo "📅 $(date)"
 echo "=============================="
 
 # =========================
-# 1. Update system
+# Fix Ubuntu mirror
 # =========================
-echo "📦 Updating system..."
-sudo apt update -y
-sudo apt upgrade -y
+echo "🌍 Switching to stable Ubuntu mirror..."
+sed -i 's|http://security.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
 
 # =========================
-# 2. Install dependencies
+# Safe apt update with retry
+# =========================
+echo "📦 Updating system (with retries)..."
+
+for i in {1..5}; do
+  apt-get clean
+  rm -rf /var/lib/apt/lists/*
+  if apt-get update; then
+    echo "✅ apt update successful"
+    break
+  fi
+  echo "⚠️ apt update failed... retrying ($i/5)"
+  sleep 10
+done
+
+apt-get upgrade -y
+
+# =========================
+# Install dependencies
 # =========================
 echo "🔧 Installing dependencies..."
-sudo apt install -y curl wget git unzip net-tools
+apt-get install -y curl wget git unzip net-tools
 
 # =========================
-# 3. Install Docker
-# =========================
-echo "🐳 Installing Docker..."
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker ubuntu
-
-# =========================
-# 4. Install K3s (Kubernetes)
+# Install K3s
 # =========================
 echo "☸️ Installing K3s..."
 curl -sfL https://get.k3s.io | sh -
 
-echo "⏳ Waiting for K3s to be ready..."
-sleep 25
+# =========================
+# Wait for K3s
+# =========================
+KUBECTL="/usr/local/bin/kubectl"
+
+echo "⏳ Waiting for Kubernetes API..."
+
+for i in {1..15}; do
+  if $KUBECTL get nodes &>/dev/null; then
+    echo "✅ Kubernetes is ready"
+    break
+  fi
+  echo "⏳ Still starting... ($i/15)"
+  sleep 10
+done
 
 # =========================
-# 5. Configure kubectl
+# Configure kubeconfig
 # =========================
-echo "⚙️ Configuring kubectl..."
+echo "⚙️ Configuring kubeconfig..."
 
-mkdir -p /home/ubuntu/.kube
-sudo cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config
-sudo chown ubuntu:ubuntu /home/ubuntu/.kube/config
-
-export KUBECONFIG=/home/ubuntu/.kube/config
+if id "ubuntu" &>/dev/null; then
+  USER_HOME="/home/ubuntu"
+  mkdir -p $USER_HOME/.kube
+  cp /etc/rancher/k3s/k3s.yaml $USER_HOME/.kube/config
+  chown ubuntu:ubuntu $USER_HOME/.kube/config
+  export KUBECONFIG=$USER_HOME/.kube/config
+else
+  echo "⚠️ ubuntu user not found, using root kubeconfig"
+  export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+fi
 
 # =========================
-# 6. Verify Kubernetes
+# Verify Kubernetes
 # =========================
 echo "🔍 Checking Kubernetes..."
-kubectl get nodes
+$KUBECTL get nodes
 
 # =========================
-# 7. Install Helm
+# Install Helm
 # =========================
 echo "📦 Installing Helm..."
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # =========================
-# 8. Open Ports (NodePort)
+# Open Ports
 # =========================
 echo "🌐 Opening ports..."
 
-sudo iptables -I INPUT -p tcp --dport 30000:32767 -j ACCEPT
-sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+iptables -I INPUT -p tcp --dport 30000:32767 -j ACCEPT
+iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+iptables -I INPUT -p tcp --dport 443 -j ACCEPT
 
-echo "⚙️ Installing iptables-persistent (non-interactive)..."
+echo "⚙️ Installing iptables-persistent..."
 
-echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
-echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
 
-sudo apt install -y iptables-persistent
-sudo netfilter-persistent save
+apt-get install -y iptables-persistent
+netfilter-persistent save
 
 # =========================
-# 9. System Info
+# System Info
 # =========================
 echo "💾 System Info:"
 free -h
 df -h
 
 # =========================
-# 10. Final Validation
+# Final Validation
 # =========================
 echo "=============================="
 echo "🔍 FINAL VALIDATION"
 echo "=============================="
 
 echo "📦 Kubernetes Nodes:"
-kubectl get nodes
+$KUBECTL get nodes
 
 echo ""
 echo "📦 System Pods:"
-kubectl get pods -A
+$KUBECTL get pods -A
 
 echo ""
 echo "🌐 Open Ports:"
-sudo netstat -tulnp | grep LISTEN | head -20
+netstat -tulnp | grep LISTEN | head -20
 
 echo ""
 echo "💾 Memory:"

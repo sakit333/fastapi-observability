@@ -108,11 +108,13 @@ build_images() {
 
     sudo k3s ctr images rm docker.io/sakit333/fastapi-observability:latest 2>/dev/null || true
 
-    docker save sakit333/fastapi-observability:latest | sudo k3s ctr images import -
+    docker save sakit333/fastapi-observability:latest -o /tmp/app-image.tar
+    sudo k3s ctr images import /tmp/app-image.tar
+    rm -f /tmp/app-image.tar
 
     echo "✅ Image imported into k3s"
   else
-    echo "ℹ️ k3s not found → skipping import (Docker/Docker Desktop case)"
+    echo "ℹ️ k3s not found → skipping import"
   fi
 }
 
