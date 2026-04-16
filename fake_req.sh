@@ -7,6 +7,7 @@ ORDER_URL="$BASE_URL/swiggy/order"
 PAYMENT_URL="$BASE_URL/phonepe/payment"
 REALTIME_URL="$BASE_URL/swiggy/realtime"
 METRIC_URL="$BASE_URL/demo/user-metric"
+LOAD_URL="$BASE_URL/demo/load"
 
 for batch in {1..10}; do
   for i in {1..100}; do
@@ -33,6 +34,11 @@ for batch in {1..10}; do
         -X GET "$REALTIME_URL/$i/1/1" \
         -H "accept: application/json")
 
+      # LOAD
+      load_status=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X GET "$LOAD_URL" \
+        -H "accept: application/json")
+        
       # METRIC
       metric_status=$(curl -s -o /dev/null -w "%{http_code}" \
         -X GET "$METRIC_URL/$i" \

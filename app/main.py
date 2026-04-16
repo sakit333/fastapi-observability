@@ -138,6 +138,16 @@ REQUEST_COUNT = Counter("request_count", "Total Request Count")
 INFO_COUNT = Counter("demo_info_count", "Count of /demo/info requests")
 ERROR_COUNT = Counter("demo_error_count", "Count of /demo/error requests")
 WORK_DURATION = Histogram("demo_work_duration_seconds", "Duration of /demo/work requests")
+REQUEST_LATENCY = Histogram(
+    "request_latency_seconds",
+    "Latency of HTTP requests",
+    ["method", "endpoint"]
+)
+REQUEST_COUNT_V2 = Counter(
+    "request_count_v2",
+    "Total Request Count",
+    ["method", "endpoint"]
+)
 
 app = FastAPI()
 
@@ -479,15 +489,34 @@ def tenant_demo(tenant_id: str):
 
 @app.get("/demo/load")
 async def generate_load():
-    with tracer.start_as_current_span("load-test-span") as span:
-        trace_id = format(span.get_span_context().trace_id, "032x")
-        tasks = []
-        for _ in range(50):
-            tasks.append(asyncio.sleep(random.uniform(0.1, 0.5)))
-        await asyncio.gather(*tasks)
+    REQUEST_COUNT_V2.labels(method="GET", endpoint="/demo/load").inc()
 
-        logger.warning("Load spike generated")
-        return {"status": "load generated", "trace_id": trace_id, "endpoint": "/demo/load"}
+    with REQUEST_LATENCY.labels(method="GET", endpoint="/demo/load").time():
+        with tracer.start_as_current_span("load-test-span") as span:
+            trace_id = format(span.get_span_context().trace_id, "032x")
+
+            logger.info(
+                "Load test initiated",
+                extra={"trace_id": trace_id, "endpoint": "/demo/load"}
+            )
+
+            async def traced_task(i):
+                with tracer.start_as_current_span(f"task-{i}"):
+                    await asyncio.sleep(random.uniform(0.1, 0.5))
+
+            tasks = [traced_task(i) for i in range(50)]
+            await asyncio.gather(*tasks)
+
+            logger.warning(
+                "Load spike generated",
+                extra={"trace_id": trace_id, "endpoint": "/demo/load"}
+            )
+
+            return {
+                "status": "load generated",
+                "trace_id": trace_id,
+                "endpoint": "/demo/load"
+            }
 
 @app.get("/demo/background")
 async def background_task():
