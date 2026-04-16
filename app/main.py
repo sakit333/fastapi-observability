@@ -138,15 +138,16 @@ REQUEST_COUNT = Counter("request_count", "Total Request Count")
 INFO_COUNT = Counter("demo_info_count", "Count of /demo/info requests")
 ERROR_COUNT = Counter("demo_error_count", "Count of /demo/error requests")
 WORK_DURATION = Histogram("demo_work_duration_seconds", "Duration of /demo/work requests")
-REQUEST_LATENCY = Histogram(
-    "request_latency_seconds",
-    "Latency of HTTP requests",
-    ["method", "endpoint"]
-)
 REQUEST_COUNT_V2 = Counter(
-    "request_count_v2",
-    "Total Request Count",
-    ["method", "endpoint"]
+    "http_requests_total",
+    "Total HTTP Requests",
+    ["method", "endpoint", "status"]
+)
+
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP Request Latency",
+    ["method", "endpoint", "status"]
 )
 
 app = FastAPI()
@@ -157,39 +158,88 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     request_id = str(uuid.uuid4())
-    with tracer.start_as_current_span(f"http-{request.method}-{request.url.path}") as span:
+
+    route = request.scope.get("route")
+    endpoint = route.path if route else request.url.path
+
+    with tracer.start_as_current_span(f"{request.method} {endpoint}") as span:
         span.set_attribute("http.method", request.method)
+        span.set_attribute("http.route", endpoint)
         span.set_attribute("http.url", str(request.url))
         span.set_attribute("request_id", request_id)
+
         start_time = time.time()
+
         try:
             response = await call_next(request)
             process_time = time.time() - start_time
+
+            trace_id = format(span.get_span_context().trace_id, "032x")
+
+            # 🔥 TRACE
             span.set_attribute("http.status_code", response.status_code)
-            # logger.info(
-            #     "Request completed",
-            #     extra={
-            #         "request_id": request_id,
-            #         "method": request.method,
-            #         "path": request.url.path,
-            #         "status_code": response.status_code,
-            #         "duration": process_time
-            #     }
-            # )
-            # span.set_attribute("http.response_time", process_time)
-            # logger.info(f"Request: {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.2f}s")
+            span.set_attribute("http.duration", process_time)
+
+            # 🔥 METRICS (FIXED: added status)
+            REQUEST_COUNT_V2.labels(
+                method=request.method,
+                endpoint=endpoint,
+                status=response.status_code
+            ).inc()
+
+            REQUEST_LATENCY.labels(
+                method=request.method,
+                endpoint=endpoint,
+                status=response.status_code
+            ).observe(process_time)
+
+            # 🔥 LOGS (FIXED: added trace_id)
+            logger.info(
+                "Request Processed",
+                extra={
+                    "request_id": request_id,
+                    "trace_id": trace_id,
+                    "endpoint": endpoint,
+                    "method": request.method,
+                    "status": response.status_code,
+                    "latency": process_time
+                }
+            )
+
             return response
+
         except Exception:
+            process_time = time.time() - start_time
+            trace_id = format(span.get_span_context().trace_id, "032x")
+
+            # 🔥 TRACE ERROR
+            span.set_attribute("http.status_code", 500)
+            span.set_attribute("error", True)
+
+            # 🔥 METRICS ERROR
+            REQUEST_COUNT_V2.labels(
+                method=request.method,
+                endpoint=endpoint,
+                status=500
+            ).inc()
+
+            REQUEST_LATENCY.labels(
+                method=request.method,
+                endpoint=endpoint,
+                status=500
+            ).observe(process_time)
+
+            # 🔥 LOG ERROR
             logger.error(
-                "Request failed",
+                "Request Failed",
                 exc_info=True,
-                extra={"request_id": request_id}
+                extra={
+                    "request_id": request_id,
+                    "trace_id": trace_id,
+                    "endpoint": endpoint
+                }
             )
             raise
-        # except Exception as e:
-        #     logger.error("An error occurred while processing the request", exc_info=True)
-        #     raise e
-        
 
 # Simulated payment flow with multiple spans, attributes, and error handling to demonstrate tracing and logging in a realistic scenario
 
@@ -489,34 +539,31 @@ def tenant_demo(tenant_id: str):
 
 @app.get("/demo/load")
 async def generate_load():
-    REQUEST_COUNT_V2.labels(method="GET", endpoint="/demo/load").inc()
+    with tracer.start_as_current_span("load-test-span") as span:
+        trace_id = format(span.get_span_context().trace_id, "032x")
 
-    with REQUEST_LATENCY.labels(method="GET", endpoint="/demo/load").time():
-        with tracer.start_as_current_span("load-test-span") as span:
-            trace_id = format(span.get_span_context().trace_id, "032x")
+        logger.info(
+            "Load test initiated",
+            extra={"trace_id": trace_id, "endpoint": "/demo/load"}
+        )
 
-            logger.info(
-                "Load test initiated",
-                extra={"trace_id": trace_id, "endpoint": "/demo/load"}
-            )
+        async def traced_task(i):
+            with tracer.start_as_current_span(f"task-{i}"):
+                await asyncio.sleep(random.uniform(0.1, 0.5))
 
-            async def traced_task(i):
-                with tracer.start_as_current_span(f"task-{i}"):
-                    await asyncio.sleep(random.uniform(0.1, 0.5))
+        tasks = [traced_task(i) for i in range(50)]
+        await asyncio.gather(*tasks)
 
-            tasks = [traced_task(i) for i in range(50)]
-            await asyncio.gather(*tasks)
+        logger.warning(
+            "Load spike generated",
+            extra={"trace_id": trace_id, "endpoint": "/demo/load"}
+        )
 
-            logger.warning(
-                "Load spike generated",
-                extra={"trace_id": trace_id, "endpoint": "/demo/load"}
-            )
-
-            return {
-                "status": "load generated",
-                "trace_id": trace_id,
-                "endpoint": "/demo/load"
-            }
+        return {
+            "status": "load generated",
+            "trace_id": trace_id,
+            "endpoint": "/demo/load"
+        }
 
 @app.get("/demo/background")
 async def background_task():
