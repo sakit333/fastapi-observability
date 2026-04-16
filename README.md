@@ -20,6 +20,7 @@ See the documentation for installation and usage instructions.
 3. Run `docker-compose up -d --build` to start all services
 4. Access the application at `http://localhost:8000`
 5. Run `docker-compose down` to stop and remove containers
+6. To remove all which is i created `docker compose down --volumes --rmi all --remove-orphans`
 
 For more details, see the [Docker Compose documentation](https://docs.docker.com/compose/).
 ---
