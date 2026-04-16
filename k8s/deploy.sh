@@ -84,8 +84,25 @@ cleanup_ports() {
 }
 
 delete_images() {
-  echo "🧹 Deleting local Docker images..."
-  docker rmi sakit333/fastapi-observability:latest --force
+  echo "🧹 Cleaning up images..."
+
+  # If Docker exists → remove Docker image
+  if command -v docker >/dev/null 2>&1; then
+    echo "🐳 Removing Docker image..."
+    docker rmi sakit333/fastapi-observability:latest --force 2>/dev/null || true
+  else
+    echo "⚠️ Docker not installed → skipping Docker image removal"
+  fi
+
+  # If k3s exists → remove from containerd
+  if command -v k3s >/dev/null 2>&1; then
+    echo "📦 Removing image from k3s (containerd)..."
+    sudo k3s ctr images rm docker.io/sakit333/fastapi-observability:latest 2>/dev/null || true
+  else
+    echo "ℹ️ k3s not found → skipping containerd cleanup"
+  fi
+
+  echo "✅ Cleanup complete"
 }
 
 deploy_core() {
