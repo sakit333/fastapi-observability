@@ -86,21 +86,19 @@ cleanup_ports() {
 delete_images() {
   echo "🧹 Cleaning up images..."
 
-  # If Docker exists → remove Docker image
+  IMAGE="sakit333/fastapi-observability:latest"
+
   if command -v docker >/dev/null 2>&1; then
     echo "🐳 Removing Docker image..."
-    docker rmi sakit333/fastapi-observability:latest --force 2>/dev/null || true
-  else
-    echo "⚠️ Docker not installed → skipping Docker image removal"
+    docker rmi $IMAGE --force 2>/dev/null || true
   fi
 
-  # If k3s exists → remove from containerd
   if command -v k3s >/dev/null 2>&1; then
-    echo "📦 Removing image from k3s (containerd)..."
-    sudo k3s ctr images rm docker.io/sakit333/fastapi-observability:latest 2>/dev/null || true
-  else
-    echo "ℹ️ k3s not found → skipping containerd cleanup"
+    echo "📦 Removing image from k3s..."
+    sudo k3s ctr images rm docker.io/$IMAGE 2>/dev/null || true
   fi
+
+  rm -f /tmp/app-image.tar
 
   echo "✅ Cleanup complete"
 }
@@ -116,7 +114,11 @@ build_images() {
 
   ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 
-  docker build -t sakit333/fastapi-observability:latest "$ROOT_DIR"
+  # Build image
+  if ! docker build -t sakit333/fastapi-observability:latest "$ROOT_DIR"; then
+    echo "❌ Docker build failed"
+    return 1
+  fi
 
   echo "🔍 Checking for k3s..."
 
@@ -125,11 +127,21 @@ build_images() {
 
     sudo k3s ctr images rm docker.io/sakit333/fastapi-observability:latest 2>/dev/null || true
 
-    docker save sakit333/fastapi-observability:latest -o /tmp/app-image.tar
-    sudo k3s ctr images import /tmp/app-image.tar
-    rm -f /tmp/app-image.tar
+    # Save image safely
+    if docker save sakit333/fastapi-observability:latest -o /tmp/app-image.tar; then
 
-    echo "✅ Image imported into k3s"
+      if [ -f /tmp/app-image.tar ]; then
+        sudo k3s ctr images import /tmp/app-image.tar
+        rm -f /tmp/app-image.tar
+        echo "✅ Image imported into k3s"
+      else
+        echo "❌ Image tar not found"
+      fi
+
+    else
+      echo "❌ docker save failed"
+    fi
+
   else
     echo "ℹ️ k3s not found → skipping import"
   fi

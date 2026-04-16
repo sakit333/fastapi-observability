@@ -43,26 +43,37 @@ echo "🔧 Installing dependencies..."
 apt-get install -y curl wget git unzip net-tools
 
 # =========================
+# Install Docker (REQUIRED)
+# =========================
+echo "🐳 Installing Docker..."
+curl -fsSL https://get.docker.com | sh
+systemctl enable docker
+systemctl start docker
+echo "✅ Docker installed"
+
+# =========================
 # Install K3s
 # =========================
 echo "☸️ Installing K3s..."
 curl -sfL https://get.k3s.io | sh -
 
 # =========================
-# Wait for K3s
+# Kubernetes readiness wait
 # =========================
 KUBECTL="/usr/local/bin/kubectl"
 
 echo "⏳ Waiting for Kubernetes API..."
 
-for i in {1..15}; do
+for i in {1..30}; do
   if $KUBECTL get nodes &>/dev/null; then
     echo "✅ Kubernetes is ready"
     break
   fi
-  echo "⏳ Still starting... ($i/15)"
-  sleep 10
+  echo "⏳ Waiting... ($i/30)"
+  sleep 5
 done
+
+$KUBECTL get nodes
 
 # =========================
 # Configure kubeconfig
@@ -79,6 +90,10 @@ else
   echo "⚠️ ubuntu user not found, using root kubeconfig"
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 fi
+
+# GLOBAL kubeconfig for all sessions/scripts
+echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> /etc/profile
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 # =========================
 # Verify Kubernetes
@@ -106,8 +121,8 @@ echo "⚙️ Installing iptables-persistent..."
 echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
 echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
 
-apt-get install -y iptables-persistent
-netfilter-persistent save
+apt-get install -y iptables-persistent || true
+netfilter-persistent save || true
 
 # =========================
 # System Info
