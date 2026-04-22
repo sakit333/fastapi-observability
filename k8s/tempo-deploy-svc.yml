@@ -17,7 +17,6 @@ data:
 
     # 🔥 REQUIRED FOR rate()
     metrics_generator:
-      enabled: true
       storage:
         path: /tmp/tempo/generator/wal
       processor:
@@ -36,8 +35,6 @@ data:
         backend: local
         local:
           path: /tmp/tempo
-        wal:
-          path: /tmp/tempo/wal
 
 ---
 apiVersion: apps/v1
@@ -69,6 +66,8 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/tempo
+            - name: tempo-data
+              mountPath: /tmp/tempo
 
           resources:
             requests:
@@ -82,6 +81,8 @@ spec:
         - name: config
           configMap:
             name: tempo-config
+        - name: tempo-data
+          emptyDir: {}
 
 ---
 apiVersion: v1
