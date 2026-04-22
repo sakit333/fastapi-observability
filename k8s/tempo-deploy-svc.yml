@@ -20,12 +20,18 @@ data:
       storage:
         path: /tmp/tempo/generator/wal
       processor:
+        local_blocks: {}
         service_graphs: {}
         span_metrics: {}
 
     # 🔥 REQUIRED to activate processors
     overrides:
-      metrics_generator_processors: [service-graphs, span-metrics]
+      defaults:
+        metrics_generator:
+          processors:
+            - local-blocks
+            - span-metrics
+            - service-graphs
 
     # 🔥 REQUIRED for query path
     querier: {}
