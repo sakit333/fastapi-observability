@@ -22,18 +22,26 @@ metrics_generator:
   processor:
     service_graphs: {}
     span_metrics: {}
-    
-overrides:
-  metrics_generator_processors: [service-graphs, span-metrics]
+
+# overrides:
+#   metrics_generator_processors: [service-graphs, span-metrics]
   
 # # IMPORTANT: You must tell Tempo to actually USE the generator
 # usage_report:
 #   enabled: false
 
 # Add this to ensure the search handles metrics
+# querier:
+#   search:
+#     external_endpoints: []
+
 querier:
+  frontend_worker:
+    frontend_address: 127.0.0.1:9095
+
+query_frontend:
   search:
-    external_endpoints: []
+    duration_slo: 5s
 
 storage:
   trace:
