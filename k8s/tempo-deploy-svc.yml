@@ -57,6 +57,7 @@ spec:
       containers:
         - name: tempo
           image: grafana/tempo:2.5.0
+          imagePullPolicy: Always
           args:
             - "-config.file=/etc/tempo/tempo.yml"
 
