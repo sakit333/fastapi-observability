@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BASE_URL="http://13.201.59.143:30007"
+BASE_URL="http://13.206.97.8:30007"
 
 POST_URL="$BASE_URL/bank/canara/transfer"
 ORDER_URL="$BASE_URL/swiggy/order"

@@ -49,7 +49,7 @@ variable "key_name" {
 variable "volume_size" {
   description = "Root volume size"
   type        = number
-  default     = 30
+  default     = 60
 }
 
 variable "project_name" {
