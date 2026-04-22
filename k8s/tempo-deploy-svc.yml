@@ -15,11 +15,29 @@ data:
             grpc:
             http:
 
+    # 🔥 REQUIRED FOR rate()
+    metrics_generator:
+      enabled: true
+      storage:
+        path: /tmp/tempo/generator/wal
+      processor:
+        service_graphs: {}
+        span_metrics: {}
+
+    # 🔥 REQUIRED to activate processors
+    overrides:
+      metrics_generator_processors: [service-graphs, span-metrics]
+
+    # 🔥 REQUIRED for query path
+    querier: {}
+
     storage:
       trace:
         backend: local
         local:
           path: /tmp/tempo
+        wal:
+          path: /tmp/tempo/wal
 
 ---
 apiVersion: apps/v1
