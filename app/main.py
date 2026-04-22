@@ -608,42 +608,42 @@ async def cache_demo(key: str):
 
         return {"key": key, "value": "cached_value", "cache": "miss", "trace_id": trace_id, "endpoint": f"/demo/cache/{key}"}
 
-@app.get("/demo/alert")
-def trigger_alert():
-    with tracer.start_as_current_span("alert-span") as span:
-        trace_id = format(span.get_span_context().trace_id, "032x")
-        for _ in range(20):
-            ERROR_COUNT.inc()
+# @app.get("/demo/alert")
+# def trigger_alert():
+#     with tracer.start_as_current_span("alert-span") as span:
+#         trace_id = format(span.get_span_context().trace_id, "032x")
+#         for _ in range(20):
+#             ERROR_COUNT.inc()
 
-        logger.critical("Alert condition triggered!")
-        return {"status": "alert triggered", "trace_id": trace_id, "endpoint": "/demo/alert"}
+#         logger.critical("Alert condition triggered!")
+#         return {"status": "alert triggered", "trace_id": trace_id, "endpoint": "/demo/alert"}
     
-@app.get("/demo/retry")
-async def retry_demo(attempt: int = 1):
-    with tracer.start_as_current_span("retry-span") as span:
-        span.set_attribute("retry.attempt", attempt)
-        trace_id = format(span.get_span_context().trace_id, "032x")
+# @app.get("/demo/retry")
+# async def retry_demo(attempt: int = 1):
+#     with tracer.start_as_current_span("retry-span") as span:
+#         span.set_attribute("retry.attempt", attempt)
+#         trace_id = format(span.get_span_context().trace_id, "032x")
 
-        if attempt < 3:
-            logger.warning(f"Retry attempt {attempt}")
-            raise HTTPException(status_code=500, detail=f"Retry needed and trace_id: {trace_id}")
+#         if attempt < 3:
+#             logger.warning(f"Retry attempt {attempt}")
+#             raise HTTPException(status_code=500, detail=f"Retry needed and trace_id: {trace_id}")
 
-        return {"status": "success after retry", "trace_id": trace_id, "endpoint": "/demo/retry"}
+#         return {"status": "success after retry", "trace_id": trace_id, "endpoint": "/demo/retry"}
 
-@app.get("/demo/session")
-def session_demo(request: Request):
-    session_id = request.headers.get("X-Session-ID", str(uuid.uuid4()))
+# @app.get("/demo/session")
+# def session_demo(request: Request):
+#     session_id = request.headers.get("X-Session-ID", str(uuid.uuid4()))
 
-    with tracer.start_as_current_span("session-span") as span:
-        span.set_attribute("session.id", session_id)
-        trace_id = format(span.get_span_context().trace_id, "032x")
+#     with tracer.start_as_current_span("session-span") as span:
+#         span.set_attribute("session.id", session_id)
+#         trace_id = format(span.get_span_context().trace_id, "032x")
 
-        logger.info(
-            "Session activity",
-            extra={"session_id": session_id}
-        )
+#         logger.info(
+#             "Session activity",
+#             extra={"session_id": session_id}
+#         )
 
-        return {"session_id": session_id, "trace_id": trace_id, "endpoint": "/demo/session"}
+#         return {"session_id": session_id, "trace_id": trace_id, "endpoint": "/demo/session"}
 
 # Demo endpoints
 @app.get("/", response_class=HTMLResponse)
